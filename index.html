@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Reel — Local Video Enhancer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #12100e;
+    --panel: #1c1814;
+    --panel-2: #241f19;
+    --border: #342d24;
+    --text: #f2ede4;
+    --muted: #9c948a;
+    --amber: #e8a33d;
+    --amber-dim: #7a5a26;
+    --teal: #5fc9c0;
+    --danger: #d9634c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .display { font-family: 'Space Grotesk', sans-serif; }
+
+  #root { min-height: 100vh; }
+
+  .app {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    min-height: 100vh;
+  }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; }
+  }
+
+  /* ---- Header / filmstrip ---- */
+  .topbar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #171310, #12100e);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand-mark {
+    width: 26px; height: 26px;
+    border-radius: 6px;
+    background: conic-gradient(from 200deg, var(--amber), var(--teal), var(--amber));
+  }
+  .brand h1 {
+    font-size: 17px;
+    letter-spacing: 0.02em;
+    margin: 0;
+    font-weight: 600;
+  }
+  .brand span {
+    color: var(--muted);
+    font-size: 12px;
+    display: block;
+    margin-top: 2px;
+  }
+  .server-pill {
+    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .dot.ok { background: #7fd18a; box-shadow: 0 0 6px #7fd18a; }
+  .dot.bad { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+  .dot.pending { background: var(--muted); }
+
+  /* ---- Sidebar controls ---- */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 22px;
+    overflow-y: auto;
+  }
+  .drop-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: 10px;
+    padding: 22px 14px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    background: var(--panel);
+  }
+  .drop-zone:hover, .drop-zone.dragging {
+    border-color: var(--amber);
+    background: var(--panel-2);
+  }
+  .drop-zone p { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+  .drop-zone .file-name { color: var(--amber); font-size: 13px; margin-top: 8px; word-break: break-all; }
+
+  .section {
+    margin-top: 22px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .switch {
+    position: relative;
+    width: 34px; height: 19px;
+    border-radius: 20px;
+    background: var(--border);
+    cursor: pointer;
+    transition: background 0.15s ease;
+    flex-shrink: 0;
+  }
+  .switch.on { background: var(--amber-dim); }
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 15px; height: 15px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .switch.on::after { transform: translateX(15px); background: var(--amber); }
+
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  .field label .val { color: var(--teal); font-family: 'JetBrains Mono', monospace; }
+  select, input[type="number"] {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--amber);
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .disabled-block { opacity: 0.35; pointer-events: none; }
+
+  .run-btn {
+    width: 100%;
+    margin-top: 24px;
+    padding: 13px;
+    border-radius: 8px;
+    border: none;
+    background: var(--amber);
+    color: #1b1508;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    letter-spacing: 0.01em;
+    transition: filter 0.15s ease;
+  }
+  .run-btn:hover { filter: brightness(1.08); }
+  .run-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+  /* ---- Main preview area ---- */
+  .main {
+    padding: 30px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .stage {
+    width: 100%;
+    max-width: 720px;
+  }
+  .empty-state {
+    margin-top: 90px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .empty-state .glyph {
+    font-size: 34px;
+    margin-bottom: 10px;
+    opacity: 0.5;
+  }
+
+  video {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #000;
+  }
+
+  .meta-row {
+    display: flex;
+    gap: 18px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .meta-chip {
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 5px 10px;
+    border-radius: 6px;
+  }
+  .meta-chip b { color: var(--text); font-family: 'JetBrains Mono', monospace; font-weight: 500; }
+
+  /* ---- Filmstrip progress ---- */
+  .filmstrip {
+    display: flex;
+    gap: 4px;
+    margin-top: 26px;
+    width: 100%;
+  }
+  .frame-tick {
+    flex: 1;
+    height: 26px;
+    border-radius: 3px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    transition: background 0.25s ease, border-color 0.25s ease;
+  }
+  .frame-tick.active {
+    background: var(--amber-dim);
+    border-color: var(--amber);
+  }
+  .frame-tick.lit {
+    background: var(--amber);
+    border-color: var(--amber);
+  }
+  .stage-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .error-box {
+    margin-top: 18px;
+    background: rgba(217, 99, 76, 0.1);
+    border: 1px solid var(--danger);
+    color: #f3b3a4;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .download-btn {
+    display: inline-block;
+    margin-top: 18px;
+    padding: 11px 20px;
+    background: var(--teal);
+    color: #0c1f1d;
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const API = "http://localhost:5000/api";
+const STAGES = ["Upload", "Speed", "Crop", "Denoise", "Color", "Scale", "Export"];
+
+function Switch({ on, onToggle }) {
+  return <div className={`switch ${on ? "on" : ""}`} onClick={onToggle}></div>;
+}
+
+function App() {
+  const [serverStatus, setServerStatus] = useState("pending"); // pending | ok | bad
+  const [file, setFile] = useState(null);
+  const [jobId, setJobId] = useState(null);
+  const [filename, setFilename] = useState(null);
+  const [sourceInfo, setSourceInfo] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [processing, setProcessing] = useState(false);
+  const [progressStage, setProgressStage] = useState(-1);
+  const [error, setError] = useState(null);
+  const [downloadUrl, setDownloadUrl] = useState(null);
+  const fileInputRef = useRef(null);
+
+  // Options state
+  const [speed, setSpeed] = useState({ enabled: false, factor: 1.0 });
+  const [resolution, setResolution] = useState({ enabled: true, target: "short" });
+  const [denoise, setDenoise] = useState({ enabled: true, strength: "medium" });
+  const [color, setColor] = useState({ enabled: true, brightness: 0.03, contrast: 1.1, saturation: 1.15 });
+  const [crop, setCrop] = useState({ enabled: false, width: 1280, height: 720, x: 0, y: 0 });
+  const [trim, setTrim] = useState({ enabled: false, start: 0, duration: 30 });
+
+  useEffect(() => {
+    fetch(`${API}/health`).then(r => r.json())
+      .then(d => setServerStatus(d.ffmpeg_available ? "ok" : "bad"))
+      .catch(() => setServerStatus("bad"));
+  }, []);
+
+  const handleFile = useCallback((f) => {
+    if (!f) return;
+    setFile(f);
+    setDownloadUrl(null);
+    setError(null);
+    setPreviewUrl(URL.createObjectURL(f));
+
+    const form = new FormData();
+    form.append("video", f);
+    fetch(`${API}/probe`, { method: "POST", body: form })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) { setError(d.error); return; }
+        setJobId(d.job_id);
+        setFilename(d.filename);
+        setSourceInfo(d);
+        setCrop(c => ({ ...c, width: d.width || 1280, height: d.height || 720 }));
+        setTrim(t => ({ ...t, duration: d.duration ? Math.min(30, Math.floor(d.duration)) : 30 }));
+      })
+      .catch(() => setError("Could not reach backend. Is app.py running on port 5000?"));
+  }, []);
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    handleFile(e.dataTransfer.files[0]);
+  };
+
+  const runEnhance = async () => {
+    if (!filename) return;
+    setProcessing(true);
+    setError(null);
+    setDownloadUrl(null);
+    setProgressStage(0);
+
+    const activeStages = STAGES.map((s, i) => {
+      if (i === 0) return true; // upload always "done"
+      if (i === 1) return speed.enabled;
+      if (i === 2) return crop.enabled;
+      if (i === 3) return denoise.enabled;
+      if (i === 4) return color.enabled;
+      if (i === 5) return resolution.enabled;
+      return true; // export
+    });
+    let idx = 0;
+    const ticker = setInterval(() => {
+      idx += 1;
+      if (idx < STAGES.length) setProgressStage(idx);
+    }, 700);
+
+    const options = { speed, resolution, denoise, color, crop, trim };
+    const form = new FormData();
+    form.append("filename", filename);
+    form.append("options", JSON.stringify(options));
+
+    try {
+      const res = await fetch(`${API}/enhance`, { method: "POST", body: form });
+      const data = await res.json();
+      clearInterval(ticker);
+      if (data.error) {
+        setError(data.details || data.error);
+        setProgressStage(-1);
+      } else {
+        setProgressStage(STAGES.length);
+        setDownloadUrl(`http://localhost:5000${data.download}`);
+      }
+    } catch (e) {
+      clearInterval(ticker);
+      setError("Request failed. Check the backend server is running.");
+      setProgressStage(-1);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <div className="app">
+      <div className="topbar">
+        <div className="brand">
+          <div className="brand-mark"></div>
+          <div>
+            <h1 className="display">Reel</h1>
+            <span>local video enhancer — runs on your machine</span>
+          </div>
+        </div>
+        <div className="server-pill mono">
+          <div className={`dot ${serverStatus}`}></div>
+          {serverStatus === "ok" && "backend connected"}
+          {serverStatus === "bad" && "backend / ffmpeg not found"}
+          {serverStatus === "pending" && "checking backend…"}
+        </div>
+      </div>
+
+      <div className="sidebar">
+        <div
+          className={`drop-zone ${dragging ? "dragging" : ""}`}
+          onClick={() => fileInputRef.current.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+        >
+          <div className="display" style={{fontSize: 14, fontWeight: 600}}>
+            {file ? "Change video" : "Drop a video, or click to browse"}
+          </div>
+          <p>MP4, MOV, AVI, MKV, WEBM</p>
+          {file && <div className="file-name mono">{file.name}</div>}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="video/*"
+            style={{ display: "none" }}
+            onChange={(e) => handleFile(e.target.files[0])}
+          />
+        </div>
+
+        {/* Speed Adjustment Control */}
+        <div className="section">
+          <div className="section-head">
+            <span className="section-title">Speed Adjust</span>
+            <Switch on={speed.enabled} onToggle={() => setSpeed(s => ({...s, enabled: !s.enabled}))} />
+          </div>
+          <div className={speed.enabled ? "" : "disabled-block"}>
+            <div className="field">
+              <label>Rate Factor <span className="val">{speed.factor.toFixed(2)}x</span></label>
+              <input type="range" min="0.25" max="4.0" step="0.05" value={speed.factor}
+                onChange={e => setSpeed(s => ({...s, factor: parseFloat(e.target.value)}))} />
+            </div>
+          </div>
+        </div>
+
+        {/* Resolution */}
+        <div className="section">
+          <div className="section-head">
+            <span className="section-title">Resolution</span>
+            <Switch on={resolution.enabled} onToggle={() => setResolution(r => ({...r, enabled: !r.enabled}))} />
+          </div>
+          <div className={resolution.enabled ? "" : "disabled-block"}>
+            <div className="field">
+              <label>Target output</label>
+              <select value={resolution.target} onChange={e => setResolution(r => ({...r, target: e.target.value}))}>
+                <option value="720p">720p (HD)</option>
+                <option value="1080p">1080p (Full HD)</option>
+                <option value="1440p">1440p (2K)</option>
+                <option value="4k">2160p (4K)</option>
+                <option value="short">1080 × 1920 (Shorts / Reels)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Denoise */}
+        <div className="section">
+          <div className="section-head">
+            <span className="section-title">Noise removal</span>
+            <Switch on={denoise.enabled} onToggle={() => setDenoise(d => ({...d, enabled: !d.enabled}))} />
+          </div>
+          <div className={denoise.enabled ? "" : "disabled-block"}>
+            <div className="field">
+              <label>Strength</label>
+              <select value={denoise.strength} onChange={e => setDenoise(d => ({...d, strength: e.target.value}))}>
+                <option value="light">Light</option>
+                <option value="medium">Medium</option>
+                <option value="strong">Strong</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Color */}
+        <div className="section">
+          <div className="section-head">
+            <span className="section-title">Color correction</span>
+            <Switch on={color.enabled} onToggle={() => setColor(c => ({...c, enabled: !c.enabled}))} />
+          </div>
+          <div className={color.enabled ? "" : "disabled-block"}>
+            <div className="field">
+              <label>Brightness <span className="val">{color.brightness.toFixed(2)}</span></label>
+              <input type="range" min="-0.3" max="0.3" step="0.01" value={color.brightness}
+                onChange={e => setColor(c => ({...c, brightness: parseFloat(e.target.value)}))} />
+            </div>
+            <div className="field">
+              <label>Contrast <span className="val">{color.contrast.toFixed(2)}</span></label>
+              <input type="range" min="0.5" max="2" step="0.01" value={color.contrast}
+                onChange={e => setColor(c => ({...c, contrast: parseFloat(e.target.value)}))} />
+            </div>
+            <div className="field">
+              <label>Saturation <span className="val">{color.saturation.toFixed(2)}</span></label>
+              <input type="range" min="0" max="2.5" step="0.01" value={color.saturation}
+                onChange={e => setColor(c => ({...c, saturation: parseFloat(e.target.value)}))} />
+            </div>
+          </div>
+        </div>
+
+        {/* Crop */}
+        <div className="section">
+          <div className="section-head">
+            <span className="section-title">Crop</span>
+            <Switch on={crop.enabled} onToggle={() => setCrop(c => ({...c, enabled: !c.enabled}))} />
+          </div>
+          <div className={crop.enabled ? "" : "disabled-block"}>
+            <div className="grid2">
+              <div className="field">
+                <label>Width (px)</label>
+                <input type="number" value={crop.width} onChange={e => setCrop(c => ({...c, width: parseInt(e.target.value)||0}))} />
+              </div>
+              <div className="field">
+                <label>Height (px)</label>
+                <input type="number" value={crop.height} onChange={e => setCrop(c => ({...c, height: parseInt(e.target.value)||0}))} />
+              </div>
+              <div className="field">
+                <label>Offset X</label>
+                <input type="number" value={crop.x} onChange={e => setCrop(c => ({...c, x: parseInt(e.target.value)||0}))} />
+              </div>
+              <div className="field">
+                <label>Offset Y</label>
+                <input type="number" value={crop.y} onChange={e => setCrop(c => ({...c, y: parseInt(e.target.value)||0}))} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Trim */}
+        <div className="section">
+          <div className="section-head">
+            <span className="section-title">Trim</span>
+            <Switch on={trim.enabled} onToggle={() => setTrim(t => ({...t, enabled: !t.enabled}))} />
+          </div>
+          <div className={trim.enabled ? "" : "disabled-block"}>
+            <div className="grid2">
+              <div className="field">
+                <label>Start (sec)</label>
+                <input type="number" value={trim.start} onChange={e => setTrim(t => ({...t, start: parseFloat(e.target.value)||0}))} />
+              </div>
+              <div className="field">
+                <label>Duration (sec)</label>
+                <input type="number" value={trim.duration} onChange={e => setTrim(t => ({...t, duration: parseFloat(e.target.value)||0}))} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button className="run-btn" disabled={!file || processing || serverStatus !== "ok"} onClick={runEnhance}>
+          {processing ? "Processing…" : "Run enhancement"}
+        </button>
+      </div>
+
+      <div className="main">
+        <div className="stage">
+          {!file && (
+            <div className="empty-state">
+              <div className="glyph">▤</div>
+              <div className="display" style={{fontSize: 16, marginBottom: 4}}>No video loaded</div>
+              <div style={{fontSize: 13}}>Drop a file on the left to get started</div>
+            </div>
+          )}
+
+          {file && (
+            <React.Fragment>
+              <video src={downloadUrl || previewUrl} controls key={downloadUrl || previewUrl}></video>
+
+              <div className="meta-row">
+                {sourceInfo && sourceInfo.width && (
+                  <div className="meta-chip">source <b>{sourceInfo.width}×{sourceInfo.height}</b></div>
+                )}
+                {sourceInfo && sourceInfo.duration && (
+                  <div className="meta-chip">duration <b>{sourceInfo.duration.toFixed(1)}s</b></div>
+                )}
+                {downloadUrl && <div className="meta-chip" style={{borderColor: "var(--teal)"}}>status <b style={{color: "var(--teal)"}}>enhanced</b></div>}
+              </div>
+
+              {(processing || progressStage >= 0) && (
+                <React.Fragment>
+                  <div className="filmstrip">
+                    {STAGES.map((s, i) => (
+                      <div key={s} className={`frame-tick ${i < progressStage ? "lit" : i === progressStage ? "active" : ""}`}></div>
+                    ))}
+                  </div>
+                  <div className="stage-labels mono">
+                    {STAGES.map(s => <span key={s}>{s}</span>)}
+                  </div>
+                </React.Fragment>
+              )}
+
+              {error && <div className="error-box mono">{error}</div>}
+
+              {downloadUrl && (
+                <a className="download-btn" href={downloadUrl} download>Download enhanced video</a>
+              )}
+            </React.Fragment>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
