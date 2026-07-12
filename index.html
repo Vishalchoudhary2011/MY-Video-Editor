@@ -1,643 +1,696 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>Reel — Local Video Enhancer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg: #12100e;
-    --panel: #1c1814;
-    --panel-2: #241f19;
-    --border: #342d24;
-    --text: #f2ede4;
-    --muted: #9c948a;
-    --amber: #e8a33d;
-    --amber-dim: #7a5a26;
-    --teal: #5fc9c0;
-    --danger: #d9634c;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  .mono { font-family: 'JetBrains Mono', monospace; }
-  .display { font-family: 'Space Grotesk', sans-serif; }
-
-  #root { min-height: 100vh; }
-
-  .app {
-    display: grid;
-    grid-template-columns: 340px 1fr;
-    min-height: 100vh;
-  }
-  @media (max-width: 860px) {
-    .app { grid-template-columns: 1fr; }
-  }
-
-  /* ---- Header / filmstrip ---- */
-  .topbar {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 28px;
-    border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, #171310, #12100e);
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .brand-mark {
-    width: 26px; height: 26px;
-    border-radius: 6px;
-    background: conic-gradient(from 200deg, var(--amber), var(--teal), var(--amber));
-  }
-  .brand h1 {
-    font-size: 17px;
-    letter-spacing: 0.02em;
-    margin: 0;
-    font-weight: 600;
-  }
-  .brand span {
-    color: var(--muted);
-    font-size: 12px;
-    display: block;
-    margin-top: 2px;
-  }
-  .server-pill {
-    font-size: 11px;
-    padding: 5px 10px;
-    border-radius: 20px;
-    border: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .dot { width: 7px; height: 7px; border-radius: 50%; }
-  .dot.ok { background: #7fd18a; box-shadow: 0 0 6px #7fd18a; }
-  .dot.bad { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
-  .dot.pending { background: var(--muted); }
-
-  /* ---- Sidebar controls ---- */
-  .sidebar {
-    border-right: 1px solid var(--border);
-    padding: 22px;
-    overflow-y: auto;
-  }
-  .drop-zone {
-    border: 1.5px dashed var(--border);
-    border-radius: 10px;
-    padding: 22px 14px;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-    background: var(--panel);
-  }
-  .drop-zone:hover, .drop-zone.dragging {
-    border-color: var(--amber);
-    background: var(--panel-2);
-  }
-  .drop-zone p { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
-  .drop-zone .file-name { color: var(--amber); font-size: 13px; margin-top: 8px; word-break: break-all; }
-
-  .section {
-    margin-top: 22px;
-    border-top: 1px solid var(--border);
-    padding-top: 16px;
-  }
-  .section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-  }
-  .section-title {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-    font-weight: 600;
-  }
-
-  .switch {
-    position: relative;
-    width: 34px; height: 19px;
-    border-radius: 20px;
-    background: var(--border);
-    cursor: pointer;
-    transition: background 0.15s ease;
-    flex-shrink: 0;
-  }
-  .switch.on { background: var(--amber-dim); }
-  .switch::after {
-    content: '';
-    position: absolute;
-    top: 2px; left: 2px;
-    width: 15px; height: 15px;
-    border-radius: 50%;
-    background: var(--muted);
-    transition: transform 0.15s ease, background 0.15s ease;
-  }
-  .switch.on::after { transform: translateX(15px); background: var(--amber); }
-
-  .field { margin-bottom: 12px; }
-  .field label {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    color: var(--muted);
-    margin-bottom: 5px;
-  }
-  .field label .val { color: var(--teal); font-family: 'JetBrains Mono', monospace; }
-  select, input[type="number"] {
-    width: 100%;
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 7px 9px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-family: inherit;
-  }
-  input[type="range"] {
-    width: 100%;
-    accent-color: var(--amber);
-  }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .disabled-block { opacity: 0.35; pointer-events: none; }
-
-  .run-btn {
-    width: 100%;
-    margin-top: 24px;
-    padding: 13px;
-    border-radius: 8px;
-    border: none;
-    background: var(--amber);
-    color: #1b1508;
-    font-weight: 600;
-    font-size: 14px;
-    cursor: pointer;
-    letter-spacing: 0.01em;
-    transition: filter 0.15s ease;
-  }
-  .run-btn:hover { filter: brightness(1.08); }
-  .run-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
-
-  /* ---- Main preview area ---- */
-  .main {
-    padding: 30px 40px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-  .stage {
-    width: 100%;
-    max-width: 720px;
-  }
-  .empty-state {
-    margin-top: 90px;
-    text-align: center;
-    color: var(--muted);
-  }
-  .empty-state .glyph {
-    font-size: 34px;
-    margin-bottom: 10px;
-    opacity: 0.5;
-  }
-
-  video {
-    width: 100%;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: #000;
-  }
-
-  .meta-row {
-    display: flex;
-    gap: 18px;
-    margin-top: 12px;
-    flex-wrap: wrap;
-  }
-  .meta-chip {
-    font-size: 12px;
-    color: var(--muted);
-    background: var(--panel);
-    border: 1px solid var(--border);
-    padding: 5px 10px;
-    border-radius: 6px;
-  }
-  .meta-chip b { color: var(--text); font-family: 'JetBrains Mono', monospace; font-weight: 500; }
-
-  /* ---- Filmstrip progress ---- */
-  .filmstrip {
-    display: flex;
-    gap: 4px;
-    margin-top: 26px;
-    width: 100%;
-  }
-  .frame-tick {
-    flex: 1;
-    height: 26px;
-    border-radius: 3px;
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    transition: background 0.25s ease, border-color 0.25s ease;
-  }
-  .frame-tick.active {
-    background: var(--amber-dim);
-    border-color: var(--amber);
-  }
-  .frame-tick.lit {
-    background: var(--amber);
-    border-color: var(--amber);
-  }
-  .stage-labels {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 8px;
-    font-size: 11px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .error-box {
-    margin-top: 18px;
-    background: rgba(217, 99, 76, 0.1);
-    border: 1px solid var(--danger);
-    color: #f3b3a4;
-    padding: 12px 14px;
-    border-radius: 8px;
-    font-size: 13px;
-    white-space: pre-wrap;
-    max-height: 200px;
-    overflow-y: auto;
-  }
-
-  .download-btn {
-    display: inline-block;
-    margin-top: 18px;
-    padding: 11px 20px;
-    background: var(--teal);
-    color: #0c1f1d;
-    text-decoration: none;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 13px;
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reel — Local Video Enhancer Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-<div id="root"></div>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-sans">
 
-<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-<script type="text/babel">
-const { useState, useEffect, useRef, useCallback } = React;
-
-const API = "http://localhost:5000/api";
-const STAGES = ["Upload", "Speed", "Crop", "Denoise", "Color", "Scale", "Export"];
-
-function Switch({ on, onToggle }) {
-  return <div className={`switch ${on ? "on" : ""}`} onClick={onToggle}></div>;
-}
-
-function App() {
-  const [serverStatus, setServerStatus] = useState("pending"); // pending | ok | bad
-  const [file, setFile] = useState(null);
-  const [jobId, setJobId] = useState(null);
-  const [filename, setFilename] = useState(null);
-  const [sourceInfo, setSourceInfo] = useState(null);
-  const [dragging, setDragging] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState(null);
-  const [processing, setProcessing] = useState(false);
-  const [progressStage, setProgressStage] = useState(-1);
-  const [error, setError] = useState(null);
-  const [downloadUrl, setDownloadUrl] = useState(null);
-  const fileInputRef = useRef(null);
-
-  // Options state
-  const [speed, setSpeed] = useState({ enabled: false, factor: 1.0 });
-  const [resolution, setResolution] = useState({ enabled: true, target: "short" });
-  const [denoise, setDenoise] = useState({ enabled: true, strength: "medium" });
-  const [color, setColor] = useState({ enabled: true, brightness: 0.03, contrast: 1.1, saturation: 1.15 });
-  const [crop, setCrop] = useState({ enabled: false, width: 1280, height: 720, x: 0, y: 0 });
-  const [trim, setTrim] = useState({ enabled: false, start: 0, duration: 30 });
-
-  useEffect(() => {
-    fetch(`${API}/health`).then(r => r.json())
-      .then(d => setServerStatus(d.ffmpeg_available ? "ok" : "bad"))
-      .catch(() => setServerStatus("bad"));
-  }, []);
-
-  const handleFile = useCallback((f) => {
-    if (!f) return;
-    setFile(f);
-    setDownloadUrl(null);
-    setError(null);
-    setPreviewUrl(URL.createObjectURL(f));
-
-    const form = new FormData();
-    form.append("video", f);
-    fetch(`${API}/probe`, { method: "POST", body: form })
-      .then(r => r.json())
-      .then(d => {
-        if (d.error) { setError(d.error); return; }
-        setJobId(d.job_id);
-        setFilename(d.filename);
-        setSourceInfo(d);
-        setCrop(c => ({ ...c, width: d.width || 1280, height: d.height || 720 }));
-        setTrim(t => ({ ...t, duration: d.duration ? Math.min(30, Math.floor(d.duration)) : 30 }));
-      })
-      .catch(() => setError("Could not reach backend. Is app.py running on port 5000?"));
-  }, []);
-
-  const onDrop = (e) => {
-    e.preventDefault();
-    setDragging(false);
-    handleFile(e.dataTransfer.files[0]);
-  };
-
-  const runEnhance = async () => {
-    if (!filename) return;
-    setProcessing(true);
-    setError(null);
-    setDownloadUrl(null);
-    setProgressStage(0);
-
-    const activeStages = STAGES.map((s, i) => {
-      if (i === 0) return true; // upload always "done"
-      if (i === 1) return speed.enabled;
-      if (i === 2) return crop.enabled;
-      if (i === 3) return denoise.enabled;
-      if (i === 4) return color.enabled;
-      if (i === 5) return resolution.enabled;
-      return true; // export
-    });
-    let idx = 0;
-    const ticker = setInterval(() => {
-      idx += 1;
-      if (idx < STAGES.length) setProgressStage(idx);
-    }, 700);
-
-    const options = { speed, resolution, denoise, color, crop, trim };
-    const form = new FormData();
-    form.append("filename", filename);
-    form.append("options", JSON.stringify(options));
-
-    try {
-      const res = await fetch(`${API}/enhance`, { method: "POST", body: form });
-      const data = await res.json();
-      clearInterval(ticker);
-      if (data.error) {
-        setError(data.details || data.error);
-        setProgressStage(-1);
-      } else {
-        setProgressStage(STAGES.length);
-        setDownloadUrl(`http://localhost:5000${data.download}`);
-      }
-    } catch (e) {
-      clearInterval(ticker);
-      setError("Request failed. Check the backend server is running.");
-      setProgressStage(-1);
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  return (
-    <div className="app">
-      <div className="topbar">
-        <div className="brand">
-          <div className="brand-mark"></div>
-          <div>
-            <h1 className="display">Reel</h1>
-            <span>local video enhancer — runs on your machine</span>
-          </div>
-        </div>
-        <div className="server-pill mono">
-          <div className={`dot ${serverStatus}`}></div>
-          {serverStatus === "ok" && "backend connected"}
-          {serverStatus === "bad" && "backend / ffmpeg not found"}
-          {serverStatus === "pending" && "checking backend…"}
-        </div>
-      </div>
-
-      <div className="sidebar">
-        <div
-          className={`drop-zone ${dragging ? "dragging" : ""}`}
-          onClick={() => fileInputRef.current.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={onDrop}
-        >
-          <div className="display" style={{fontSize: 14, fontWeight: 600}}>
-            {file ? "Change video" : "Drop a video, or click to browse"}
-          </div>
-          <p>MP4, MOV, AVI, MKV, WEBM</p>
-          {file && <div className="file-name mono">{file.name}</div>}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="video/*"
-            style={{ display: "none" }}
-            onChange={(e) => handleFile(e.target.files[0])}
-          />
-        </div>
-
-        {/* Speed Adjustment Control */}
-        <div className="section">
-          <div className="section-head">
-            <span className="section-title">Speed Adjust</span>
-            <Switch on={speed.enabled} onToggle={() => setSpeed(s => ({...s, enabled: !s.enabled}))} />
-          </div>
-          <div className={speed.enabled ? "" : "disabled-block"}>
-            <div className="field">
-              <label>Rate Factor <span className="val">{speed.factor.toFixed(2)}x</span></label>
-              <input type="range" min="0.25" max="4.0" step="0.05" value={speed.factor}
-                onChange={e => setSpeed(s => ({...s, factor: parseFloat(e.target.value)}))} />
+    <header class="border-b border-gray-800 bg-gray-900/50 backdrop-blur p-4 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-black tracking-tight text-indigo-400">REEL <span class="text-xs font-normal text-gray-400 px-2 py-0.5 bg-gray-800 rounded ml-2">v2.0</span></h1>
+            <div id="connectionStatus" class="text-sm flex items-center gap-2 text-gray-400">
+                <span class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span> Checking Backend...
             </div>
-          </div>
         </div>
+    </header>
 
-        {/* Resolution */}
-        <div className="section">
-          <div className="section-head">
-            <span className="section-title">Resolution</span>
-            <Switch on={resolution.enabled} onToggle={() => setResolution(r => ({...r, enabled: !r.enabled}))} />
-          </div>
-          <div className={resolution.enabled ? "" : "disabled-block"}>
-            <div className="field">
-              <label>Target output</label>
-              <select value={resolution.target} onChange={e => setResolution(r => ({...r, target: e.target.value}))}>
-                <option value="720p">720p (HD)</option>
-                <option value="1080p">1080p (Full HD)</option>
-                <option value="1440p">1440p (2K)</option>
-                <option value="4k">2160p (4K)</option>
-                <option value="short">1080 × 1920 (Shorts / Reels)</option>
-              </select>
+    <main class="max-w-7xl mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- LEFT COLUMN: FILE UPLOAD & PREVIEW MAP -->
+        <section class="lg:col-span-5 space-y-6">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
+                <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+                    <span class="p-1.5 bg-indigo-950 text-indigo-400 rounded-lg">1</span> Import Media
+                </h2>
+                
+                <label class="border-2 border-dashed border-gray-800 hover:border-indigo-500 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition group">
+                    <input type="file" id="videoInput" accept="video/*" class="hidden">
+                    <svg class="w-8 h-8 text-gray-500 group-hover:text-indigo-400 mb-3 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                    <span id="uploadLabel" class="text-sm font-medium text-gray-300">Choose local video file</span>
+                    <span class="text-xs text-gray-500 mt-1">MP4, MOV, AVI, MKV, WEBM</span>
+                </label>
+
+                <div id="videoMeta" class="hidden mt-4 pt-4 border-t border-gray-800 text-xs text-gray-400 grid grid-cols-3 gap-2 text-center">
+                    <div class="bg-gray-950 p-2 rounded"><span class="block text-gray-500">Dimensions</span><strong id="metaResolution" class="text-gray-200">-</strong></div>
+                    <div class="bg-gray-950 p-2 rounded"><span class="block text-gray-500">Duration</span><strong id="metaDuration" class="text-gray-200">-</strong></div>
+                    <div class="bg-gray-950 p-2 rounded"><span class="block text-gray-500">Status</span><strong id="metaStatus" class="text-emerald-400">Ready</strong></div>
+                </div>
+
+                <div class="mt-4 pt-4 border-t border-gray-800">
+                    <label class="block text-xs text-gray-400 mb-2">Or import directly from a YouTube URL</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="youtubeUrl" placeholder="https://www.youtube.com/watch?v=..." class="flex-1 bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-sm text-gray-300 focus:outline-none focus:border-indigo-500">
+                        <button id="youtubeImportBtn" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium rounded-lg transition whitespace-nowrap">Import</button>
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-1.5">Only import videos you own or have rights to use.</p>
+                </div>
+
+                <video id="sourcePreview" controls class="hidden w-full mt-4 rounded-lg border border-gray-800"></video>
             </div>
-          </div>
-        </div>
 
-        {/* Denoise */}
-        <div className="section">
-          <div className="section-head">
-            <span className="section-title">Noise removal</span>
-            <Switch on={denoise.enabled} onToggle={() => setDenoise(d => ({...d, enabled: !d.enabled}))} />
-          </div>
-          <div className={denoise.enabled ? "" : "disabled-block"}>
-            <div className="field">
-              <label>Strength</label>
-              <select value={denoise.strength} onChange={e => setDenoise(d => ({...d, strength: e.target.value}))}>
-                <option value="light">Light</option>
-                <option value="medium">Medium</option>
-                <option value="strong">Strong</option>
-              </select>
+            <!-- ACTION CONTROL STATION -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl space-y-4">
+                <div class="space-y-1">
+                    <label class="block text-xs text-gray-400">Transcription Target Language</label>
+                    <select id="subtitleLanguage" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-sm text-gray-300 focus:outline-none focus:border-indigo-500">
+                        <option value="en" selected>English (EN)</option>
+                        <option value="es">Spanish (ES)</option>
+                        <option value="fr">French (FR)</option>
+                        <option value="de">German (DE)</option>
+                        <option value="pt">Portuguese (PT)</option>
+                    </select>
+                </div>
+
+                <button id="transcribeBtn" disabled class="w-full py-3 px-4 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white font-medium rounded-lg transition flex items-center justify-center gap-2">
+                    Generate Subtitle Transcription Cues
+                </button>
+                <button id="enhanceBtn" disabled class="w-full py-4 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-lg font-bold rounded-lg transition shadow-lg shadow-indigo-950/50 flex items-center justify-center gap-2">
+                    Compile & Process Video Timeline
+                </button>
+                
+                <!-- LOADING PROGRESS BAR -->
+                <div id="processingLoader" class="hidden space-y-2">
+                    <div class="flex justify-between text-xs text-gray-400">
+                        <span>Rendering engine running...</span>
+                        <span id="loaderPercent" class="animate-pulse text-indigo-400">Do not refresh</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
+                        <div class="h-full bg-indigo-500 w-1/2 animate-infinite-loading rounded-full"></div>
+                    </div>
+                </div>
             </div>
-          </div>
-        </div>
 
-        {/* Color */}
-        <div className="section">
-          <div className="section-head">
-            <span className="section-title">Color correction</span>
-            <Switch on={color.enabled} onToggle={() => setColor(c => ({...c, enabled: !c.enabled}))} />
-          </div>
-          <div className={color.enabled ? "" : "disabled-block"}>
-            <div className="field">
-              <label>Brightness <span className="val">{color.brightness.toFixed(2)}</span></label>
-              <input type="range" min="-0.3" max="0.3" step="0.01" value={color.brightness}
-                onChange={e => setColor(c => ({...c, brightness: parseFloat(e.target.value)}))} />
+            <!-- EXPORT DOWNLOAD HUB -->
+            <div id="downloadHub" class="hidden bg-gray-900 border border-indigo-900/40 rounded-xl p-6 shadow-xl space-y-4">
+                <h3 class="text-md font-bold text-emerald-400 flex items-center gap-2">🎉 Rendering Task Complete</h3>
+                <div id="singleDownloadWrapper" class="hidden space-y-3">
+                    <video id="resultPreview" controls class="w-full rounded-lg border border-gray-800"></video>
+                    <a id="downloadMainLink" href="#" target="_blank" class="w-full inline-flex justify-center items-center py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition">Download Enhanced Video</a>
+                </div>
+                <div id="segmentedDownloadWrapper" class="hidden space-y-3">
+                    <a id="downloadZipLink" href="#" class="w-full inline-flex justify-center items-center py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg transition">📦 Download All Chunks (.ZIP)</a>
+                    <div class="text-xs text-gray-400 font-semibold uppercase tracking-wider pt-2 border-t border-gray-800">Individual Sequence Segments</div>
+                    <div id="chunkList" class="max-h-40 overflow-y-auto space-y-1.5 pr-2 custom-scrollbar"></div>
+                </div>
             </div>
-            <div className="field">
-              <label>Contrast <span className="val">{color.contrast.toFixed(2)}</span></label>
-              <input type="range" min="0.5" max="2" step="0.01" value={color.contrast}
-                onChange={e => setColor(c => ({...c, contrast: parseFloat(e.target.value)}))} />
+        </section>
+
+        <!-- RIGHT COLUMN: ENHANCEMENT SUITE CONTROL PANELS -->
+        <section class="lg:col-span-7 space-y-6">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
+                <h2 class="text-lg font-bold mb-6 flex items-center gap-2">
+                    <span class="p-1.5 bg-indigo-950 text-indigo-400 rounded-lg">2</span> Processing Pipeline Configuration
+                </h2>
+
+                <div class="space-y-6">
+                    <!-- TRANSFORM (ZOOM & MIRROR FLIPS) -->
+                    <div class="p-4 bg-gray-950/60 rounded-xl border border-gray-800">
+                        <label class="flex items-center justify-between mb-3 cursor-pointer">
+                            <span class="font-semibold text-sm text-gray-200 flex items-center gap-2">🔍 Transform (Zoom & Mirror Flips)</span>
+                            <input type="checkbox" id="transformEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                        </label>
+                        <div class="grid grid-cols-2 gap-4 mt-3 pt-3 border-t border-gray-900/60">
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Scale Zoom Level</label>
+                                <div class="flex items-center gap-3">
+                                    <input type="range" id="transformZoom" min="1.0" max="2.0" step="0.05" value="1.0" class="w-full accent-indigo-500 bg-gray-900">
+                                    <span id="zoomVal" class="text-xs text-gray-300 min-w-[2.5rem]">1.0x</span>
+                                </div>
+                            </div>
+                            <div class="flex flex-col justify-end space-y-2">
+                                <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                                    <input type="checkbox" id="transformHFlip" class="rounded bg-gray-900 border-gray-700 text-indigo-600"> Horizontal Mirror
+                                </label>
+                                <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                                    <input type="checkbox" id="transformVFlip" class="rounded bg-gray-900 border-gray-700 text-indigo-600"> Vertical Flip
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AESTHETIC VISUAL FILTERS -->
+                    <div class="p-4 bg-gray-950/60 rounded-xl border border-gray-800">
+                        <label class="flex items-center justify-between mb-3 cursor-pointer">
+                            <span class="font-semibold text-sm text-gray-200">🎬 Aesthetic Preset Filters</span>
+                            <input type="checkbox" id="filterEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                        </label>
+                        <div class="mt-2">
+                            <label class="block text-xs text-gray-400 mb-1">Color Grading Profile Lookup</label>
+                            <select id="filterPreset" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none focus:border-indigo-500">
+                                <option value="none">None / Standard Matrix</option>
+                                <option value="vintage">Vintage Analog (Curves Map)</option>
+                                <option value="bw">Black & White Monochrome</option>
+                                <option value="cyberpunk">Cyberpunk Neon (Blue/Magenta Boost)</option>
+                                <option value="cinematic">Cinematic Core (Deep Contrast & Saturation)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- SUBTITLE TYPOGRAPHY OVERLAY CARD -->
+                    <div class="p-4 bg-gray-950/60 rounded-xl border border-gray-800">
+                        <label class="flex items-center justify-between mb-3 cursor-pointer">
+                            <span class="font-semibold text-sm text-gray-200">💬 Subtitle Typography & Overlays</span>
+                            <input type="checkbox" id="subtitlesEnabled" checked class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                        </label>
+                        <div class="grid grid-cols-3 gap-4 mt-3 pt-3 border-t border-gray-900/60">
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Text Color</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="color" id="subFontColor" value="#FFFFFF" class="w-8 h-8 rounded bg-transparent border-0 cursor-pointer">
+                                    <span class="text-[10px] text-gray-500 uppercase font-mono">Font</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Outline Color</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="color" id="subOutlineColor" value="#000000" class="w-8 h-8 rounded bg-transparent border-0 cursor-pointer">
+                                    <span class="text-[10px] text-gray-500 uppercase font-mono">Edge</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Animation Style</label>
+                                <select id="subAnimation" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-1.5 text-xs text-gray-300 focus:outline-none">
+                                    <option value="none">Static Pop</option>
+                                    <option value="fade" selected>Soft Fade</option>
+                                    <option value="word-by-word">Karaoke Bounce</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GRAPHIC BORDER FRAMING -->
+                    <div class="p-4 bg-gray-950/60 rounded-xl border border-gray-800">
+                        <label class="flex items-center justify-between mb-3 cursor-pointer">
+                            <span class="font-semibold text-sm text-gray-200">🖼️ Graphic Border Framing</span>
+                            <input type="checkbox" id="bordersEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                        </label>
+                        <div class="grid grid-cols-3 gap-4 mt-3 pt-3 border-t border-gray-900/60">
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Matte Type</label>
+                                <select id="bordersType" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-xs focus:outline-none">
+                                    <option value="solid">Solid Block Color</option>
+                                    <option value="blurred">Blurred Matte Overlay</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Frame Thickness</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="range" id="bordersThickness" min="5" max="80" step="5" value="20" class="w-full accent-indigo-500 bg-gray-900">
+                                    <span id="borderThicknessVal" class="text-xs text-gray-300">20px</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Color (Solid Only)</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="color" id="bordersColor" value="#000000" class="w-8 h-8 rounded bg-transparent border-0 cursor-pointer">
+                                    <input type="text" id="bordersColorText" value="#000000" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-1.5 text-xs text-center focus:outline-none">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SPEED ENGINE SECTION -->
+                    <div class="p-4 bg-gray-950/40 rounded-xl border border-gray-800/80">
+                        <label class="flex items-center justify-between mb-2 cursor-pointer">
+                            <span class="text-sm font-medium text-gray-300">⚡ Velocity Engine (Timeline Speed)</span>
+                            <input type="checkbox" id="speedEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                        </label>
+                        <div class="flex items-center gap-4 mt-2">
+                            <input type="range" id="speedFactor" min="0.5" max="4.0" step="0.1" value="1.0" class="w-full accent-indigo-500 bg-gray-900">
+                            <span id="speedVal" class="text-xs text-gray-400 min-w-[2.5rem]">1.0x</span>
+                        </div>
+                    </div>
+
+                    <!-- VOICE CHANGER SECTION -->
+                    <div class="p-4 bg-gray-950/40 rounded-xl border border-gray-800/80">
+                        <label class="flex items-center justify-between mb-2 cursor-pointer">
+                            <span class="text-sm font-medium text-gray-300">🎙️ Voice Changer (Pitch Shift)</span>
+                            <input type="checkbox" id="voiceEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                        </label>
+                        <div class="grid grid-cols-2 gap-4 mt-2">
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Preset</label>
+                                <select id="voicePreset" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none">
+                                    <option value="custom" selected>Custom (use slider)</option>
+                                    <option value="deep">Deep Voice</option>
+                                    <option value="high">High-Pitched / Chipmunk</option>
+                                    <option value="robot">Robot</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Pitch Ratio</label>
+                                <div class="flex items-center gap-3">
+                                    <input type="range" id="voicePitch" min="0.5" max="2.0" step="0.05" value="1.0" class="w-full accent-indigo-500 bg-gray-900">
+                                    <span id="voicePitchVal" class="text-xs text-gray-300 min-w-[2.5rem]">1.0x</span>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-2">Changes pitch only — playback speed stays the same. Picking a preset sets the slider; you can then fine-tune it (preset switches back to Custom automatically).</p>
+                    </div>
+
+                    <!-- COLOR MANIPULATION -->
+                    <div class="p-4 bg-gray-950/40 rounded-xl border border-gray-800/80">
+                        <label class="flex items-center justify-between mb-4 cursor-pointer">
+                            <span class="text-sm font-medium text-gray-300">🎨 Master Color Correction</span>
+                            <input type="checkbox" id="colorEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                        </label>
+                        <div class="grid grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Brightness</label>
+                                <input type="range" id="colorBrightness" min="-1.0" max="1.0" step="0.05" value="0" class="w-full accent-indigo-500 bg-gray-900">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Contrast</label>
+                                <input type="range" id="colorContrast" min="0.5" max="2.0" step="0.05" value="1.0" class="w-full accent-indigo-500 bg-gray-900">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Saturation</label>
+                                <input type="range" id="colorSaturation" min="0.0" max="3.0" step="0.1" value="1.0" class="w-full accent-indigo-500 bg-gray-900">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RESOLUTION & DENOISE MAP -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="p-4 bg-gray-950/40 rounded-xl border border-gray-800/80 space-y-3">
+                            <label class="flex items-center justify-between cursor-pointer">
+                                <span class="text-sm font-medium text-gray-300">📐 Canvas Upscaling Target</span>
+                                <input type="checkbox" id="resolutionEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                            </label>
+                            <select id="resolutionTarget" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none">
+                                <option value="short">9:16 Vertical Shorts (1080x1920)</option>
+                                <option value="1080p" selected>16:9 Standard HD (1920x1080)</option>
+                                <option value="4k">4K Ultra HD (3840x2160)</option>
+                            </select>
+                            <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                                <input type="checkbox" id="resolutionFill" checked class="rounded bg-gray-900 border-gray-700 text-indigo-600"> Center Crop-to-Fill (No Black Letterbox Bars)
+                            </label>
+                        </div>
+
+                        <div class="p-4 bg-gray-950/40 rounded-xl border border-gray-800/80 space-y-3">
+                            <label class="flex items-center justify-between cursor-pointer">
+                                <span class="text-sm font-medium text-gray-300">🎸 Spatial Denoise Filter</span>
+                                <input type="checkbox" id="denoiseEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                            </label>
+                            <select id="denoiseStrength" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none">
+                                <option value="light">Light Polish</option>
+                                <option value="medium" selected>Medium Denoise (Recommended)</option>
+                                <option value="strong">Aggressive Clean</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- EXPORT TARGET SEGMENT STRUCTURE -->
+                    <div class="p-4 bg-gray-950/40 rounded-xl border border-gray-800/80 space-y-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium text-gray-300">📦 Deployment Splitting Setup</span>
+                            <div class="flex gap-4 text-xs">
+                                <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
+                                    <input type="radio" name="exportMode" value="chunk" checked class="text-indigo-600 bg-gray-900 border-gray-700"> Chunk Split Timeline
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
+                                    <input type="radio" name="exportMode" value="single" class="text-indigo-600 bg-gray-900 border-gray-700"> Single Clip Trim
+                                </label>
+                            </div>
+                        </div>
+                        <div id="chunkExportConfig" class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Chunk Split Interval</label>
+                                <select id="chunkLength" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none">
+                                    <option value="15">15 Second Micro-Chunks</option>
+                                    <option value="30" selected>30-Second Standard Sequences</option>
+                                    <option value="60">60 Second Extended Blocks</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="singleTrimConfig" class="hidden grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Window Start (Seconds)</label>
+                                <input type="number" id="trimStart" value="0" min="0" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Window Duration (Seconds)</label>
+                                <input type="number" id="trimDuration" value="30" min="1" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TEXT TITLE & SCROLLING TICKER (WITH HEIGHT ADJUSTMENTS) -->
+                    <div class="p-4 bg-gray-950/40 rounded-xl border border-gray-800/80 space-y-4">
+                        <div class="space-y-2">
+                            <label class="flex items-center justify-between cursor-pointer">
+                                <span class="text-sm font-medium text-gray-300">🏷️ Top Static Title Overlay</span>
+                                <input type="checkbox" id="titleEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                            </label>
+                            <input type="text" id="titleText" placeholder="e.g. BREAKING NEWS MOCKUP" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none focus:border-indigo-500 mb-2">
+                            
+                            <div class="flex items-center gap-4 bg-gray-950 p-2 rounded border border-gray-800/60">
+                                <label class="text-xs text-gray-400 min-w-[90px]">Top Margin Y:</label>
+                                <input type="range" id="titleTopMargin" min="0" max="350" step="5" value="40" class="w-full accent-indigo-500 bg-gray-900">
+                                <span id="titleTopMarginVal" class="text-xs text-gray-300 min-w-[40px]">40px</span>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <label class="flex items-center justify-between cursor-pointer">
+                                <span class="text-sm font-medium text-gray-300">🗞️ Full-Width Scrolling News-Ticker Banner</span>
+                                <input type="checkbox" id="tickerEnabled" class="w-4 h-4 text-indigo-600 rounded bg-gray-900 border-gray-700">
+                            </label>
+                            <input type="text" id="tickerText" placeholder="Enter scrolling string text pipeline..." class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none focus:border-indigo-500 mb-2">
+                            
+                            <div class="flex items-center gap-4 bg-gray-950 p-2 rounded border border-gray-800/60">
+                                <label class="text-xs text-gray-400 min-w-[90px]">Banner Height:</label>
+                                <input type="range" id="tickerBarHeight" min="0" max="350" step="5" value="85" class="w-full accent-indigo-500 bg-gray-900">
+                                <span id="tickerBarHeightVal" class="text-xs text-gray-300 min-w-[40px]">85px</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div className="field">
-              <label>Saturation <span className="val">{color.saturation.toFixed(2)}</span></label>
-              <input type="range" min="0" max="2.5" step="0.01" value={color.saturation}
-                onChange={e => setColor(c => ({...c, saturation: parseFloat(e.target.value)}))} />
-            </div>
-          </div>
-        </div>
+        </section>
+    </main>
 
-        {/* Crop */}
-        <div className="section">
-          <div className="section-head">
-            <span className="section-title">Crop</span>
-            <Switch on={crop.enabled} onToggle={() => setCrop(c => ({...c, enabled: !c.enabled}))} />
-          </div>
-          <div className={crop.enabled ? "" : "disabled-block"}>
-            <div className="grid2">
-              <div className="field">
-                <label>Width (px)</label>
-                <input type="number" value={crop.width} onChange={e => setCrop(c => ({...c, width: parseInt(e.target.value)||0}))} />
-              </div>
-              <div className="field">
-                <label>Height (px)</label>
-                <input type="number" value={crop.height} onChange={e => setCrop(c => ({...c, height: parseInt(e.target.value)||0}))} />
-              </div>
-              <div className="field">
-                <label>Offset X</label>
-                <input type="number" value={crop.x} onChange={e => setCrop(c => ({...c, x: parseInt(e.target.value)||0}))} />
-              </div>
-              <div className="field">
-                <label>Offset Y</label>
-                <input type="number" value={crop.y} onChange={e => setCrop(c => ({...c, y: parseInt(e.target.value)||0}))} />
-              </div>
-            </div>
-          </div>
-        </div>
+    <script>
+        const API_URL = "http://localhost:5000";
+        let loadedFilename = null;
+        let generatedSubtitleCues = [];
 
-        {/* Trim */}
-        <div className="section">
-          <div className="section-head">
-            <span className="section-title">Trim</span>
-            <Switch on={trim.enabled} onToggle={() => setTrim(t => ({...t, enabled: !t.enabled}))} />
-          </div>
-          <div className={trim.enabled ? "" : "disabled-block"}>
-            <div className="grid2">
-              <div className="field">
-                <label>Start (sec)</label>
-                <input type="number" value={trim.start} onChange={e => setTrim(t => ({...t, start: parseFloat(e.target.value)||0}))} />
-              </div>
-              <div className="field">
-                <label>Duration (sec)</label>
-                <input type="number" value={trim.duration} onChange={e => setTrim(t => ({...t, duration: parseFloat(e.target.value)||0}))} />
-              </div>
-            </div>
-          </div>
-        </div>
+        // UI SYNC HANDLERS FOR RANGES
+        document.getElementById('transformZoom').addEventListener('input', e => {
+            document.getElementById('zoomVal').innerText = e.target.value + 'x';
+        });
+        document.getElementById('bordersThickness').addEventListener('input', e => {
+            document.getElementById('borderThicknessVal').innerText = e.target.value + 'px';
+        });
+        document.getElementById('bordersColor').addEventListener('input', e => {
+            document.getElementById('bordersColorText').value = e.target.value;
+        });
+        document.getElementById('speedFactor').addEventListener('input', e => {
+            document.getElementById('speedVal').innerText = e.target.value + 'x';
+        });
+        const VOICE_PRESET_RATIOS = { deep: 0.8, high: 1.3, robot: 0.75 };
+        document.getElementById('voicePitch').addEventListener('input', e => {
+            document.getElementById('voicePitchVal').innerText = e.target.value + 'x';
+            document.getElementById('voicePreset').value = 'custom';
+        });
+        document.getElementById('voicePreset').addEventListener('change', e => {
+            const ratio = VOICE_PRESET_RATIOS[e.target.value];
+            if (ratio) {
+                document.getElementById('voicePitch').value = ratio;
+                document.getElementById('voicePitchVal').innerText = ratio + 'x';
+            }
+        });
+        document.getElementById('titleTopMargin').addEventListener('input', e => {
+            document.getElementById('titleTopMarginVal').innerText = e.target.value + 'px';
+        });
+        document.getElementById('tickerBarHeight').addEventListener('input', e => {
+            document.getElementById('tickerBarHeightVal').innerText = e.target.value + 'px';
+        });
 
-        <button className="run-btn" disabled={!file || processing || serverStatus !== "ok"} onClick={runEnhance}>
-          {processing ? "Processing…" : "Run enhancement"}
-        </button>
-      </div>
+        // Toggle Deployment Split Interfaces
+        document.querySelectorAll('input[name="exportMode"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                if(e.target.value === 'chunk') {
+                    document.getElementById('chunkExportConfig').classList.remove('hidden');
+                    document.getElementById('singleTrimConfig').classList.add('hidden');
+                } else {
+                    document.getElementById('chunkExportConfig').classList.add('hidden');
+                    document.getElementById('singleTrimConfig').classList.remove('hidden');
+                }
+            });
+        });
 
-      <div className="main">
-        <div className="stage">
-          {!file && (
-            <div className="empty-state">
-              <div className="glyph">▤</div>
-              <div className="display" style={{fontSize: 16, marginBottom: 4}}>No video loaded</div>
-              <div style={{fontSize: 13}}>Drop a file on the left to get started</div>
-            </div>
-          )}
+        // Core Health Validation Engine Check
+        async function checkBackendHealth() {
+            try {
+                const res = await fetch(`${API_URL}/api/health`);
+                const data = await res.json();
+                if(data.status === 'ok') {
+                    document.getElementById('connectionStatus').innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> Engine Connected`;
+                }
+            } catch (err) {
+                document.getElementById('connectionStatus').innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-500"></span> Server Offline`;
+            }
+        }
+        checkBackendHealth();
 
-          {file && (
-            <React.Fragment>
-              <video src={downloadUrl || previewUrl} controls key={downloadUrl || previewUrl}></video>
+        // Shared handler: called after either a local file upload probe or a
+        // successful YouTube import — both return the same {filename, width,
+        // height, duration} shape, so the rest of the UI doesn't need to care
+        // which source it came from.
+        function applyLoadedMedia(data, previewUrl) {
+            loadedFilename = data.filename;
+            generatedSubtitleCues = [];
 
-              <div className="meta-row">
-                {sourceInfo && sourceInfo.width && (
-                  <div className="meta-chip">source <b>{sourceInfo.width}×{sourceInfo.height}</b></div>
-                )}
-                {sourceInfo && sourceInfo.duration && (
-                  <div className="meta-chip">duration <b>{sourceInfo.duration.toFixed(1)}s</b></div>
-                )}
-                {downloadUrl && <div className="meta-chip" style={{borderColor: "var(--teal)"}}>status <b style={{color: "var(--teal)"}}>enhanced</b></div>}
-              </div>
+            document.getElementById('metaResolution').innerText = `${data.width || '?'}x${data.height || '?'}`;
+            document.getElementById('metaDuration').innerText = data.duration ? `${Math.round(data.duration)}s` : '?';
+            document.getElementById('videoMeta').classList.remove('hidden');
 
-              {(processing || progressStage >= 0) && (
-                <React.Fragment>
-                  <div className="filmstrip">
-                    {STAGES.map((s, i) => (
-                      <div key={s} className={`frame-tick ${i < progressStage ? "lit" : i === progressStage ? "active" : ""}`}></div>
-                    ))}
-                  </div>
-                  <div className="stage-labels mono">
-                    {STAGES.map(s => <span key={s}>{s}</span>)}
-                  </div>
-                </React.Fragment>
-              )}
+            document.getElementById('transcribeBtn').disabled = false;
+            document.getElementById('enhanceBtn').disabled = false;
 
-              {error && <div className="error-box mono">{error}</div>}
+            const preview = document.getElementById('sourcePreview');
+            preview.src = previewUrl;
+            preview.classList.remove('hidden');
 
-              {downloadUrl && (
-                <a className="download-btn" href={downloadUrl} download>Download enhanced video</a>
-              )}
-            </React.Fragment>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+            document.getElementById('downloadHub').classList.add('hidden');
+        }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-</script>
+        // Step 1: File Probe Submission Stage
+        document.getElementById('videoInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if(!file) return;
+
+            document.getElementById('uploadLabel').innerText = "Uploading configuration...";
+            const fd = new FormData();
+            fd.append("video", file);
+
+            try {
+                const res = await fetch(`${API_URL}/api/probe`, { method: "POST", body: fd });
+                if(!res.ok) throw new Error("Probe verification mapping failure.");
+                
+                const data = await res.json();
+                document.getElementById('uploadLabel').innerText = file.name;
+                applyLoadedMedia(data, URL.createObjectURL(file));
+            } catch (err) {
+                alert("File analysis failed: " + err.message);
+                document.getElementById('uploadLabel').innerText = "Error importing file";
+            }
+        });
+
+        // Step 1b: Import directly from a YouTube URL
+        document.getElementById('youtubeImportBtn').addEventListener('click', async () => {
+            const urlInput = document.getElementById('youtubeUrl');
+            const url = urlInput.value.trim();
+            if (!url) return;
+
+            const btn = document.getElementById('youtubeImportBtn');
+            btn.disabled = true;
+            btn.innerText = "Downloading…";
+
+            const fd = new FormData();
+            fd.append("url", url);
+
+            try {
+                const res = await fetch(`${API_URL}/api/import_youtube`, { method: "POST", body: fd });
+                const data = await res.json();
+                if (!res.ok) throw new Error((data && data.detail) || "Import failed.");
+
+                document.getElementById('uploadLabel').innerText = data.filename;
+                applyLoadedMedia(data, `${API_URL}/api/preview/${data.filename}`);
+                btn.innerText = "Imported ✓";
+                btn.classList.add('bg-emerald-900', 'text-emerald-300');
+            } catch (err) {
+                alert("YouTube import failed: " + err.message);
+                btn.innerText = "Import";
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // Step 2: Auto Subtitle Cue Generation Pipeline
+        document.getElementById('transcribeBtn').addEventListener('click', async () => {
+            if(!loadedFilename) return;
+            const btn = document.getElementById('transcribeBtn');
+            const targetLang = document.getElementById('subtitleLanguage').value;
+            btn.disabled = true;
+            btn.innerText = `Transcribing Speech (${targetLang.toUpperCase()})...`;
+
+            const fd = new FormData();
+            fd.append("filename", loadedFilename);
+            fd.append("model_size", "base");
+            fd.append("language", targetLang);
+
+            try {
+                const res = await fetch(`${API_URL}/api/transcribe`, { method: "POST", body: fd });
+                if (!res.ok) throw new Error("Server transcription failed.");
+                const data = await res.json();
+                generatedSubtitleCues = data.entries || [];
+                btn.innerText = `Speech Parsed (${data.cue_count || 0} Cues Found — ${data.language.toUpperCase()})`;
+                btn.classList.add('bg-emerald-900', 'text-emerald-300');
+            } catch (err) {
+                alert("Transcription track compilation failed.");
+                btn.disabled = false;
+                btn.innerText = "Retry Subtitle Transcription Cues";
+            }
+        });
+
+        // Step 3: Package Config Object & Dispatch Enhancer Task Engine Call
+        document.getElementById('enhanceBtn').addEventListener('click', async () => {
+            if(!loadedFilename) return;
+
+            const enhanceBtn = document.getElementById('enhanceBtn');
+            const loader = document.getElementById('processingLoader');
+            const downloadHub = document.getElementById('downloadHub');
+            
+            enhanceBtn.disabled = true;
+            loader.classList.remove('hidden');
+            downloadHub.classList.add('hidden');
+
+            const exportMode = document.querySelector('input[name="exportMode"]:checked').value;
+
+            // Strict variable parsing conversion ensures backend validation safety maps perfectly.
+            const options = {
+                transform: {
+                    enabled: document.getElementById('transformEnabled').checked,
+                    zoom: parseFloat(document.getElementById('transformZoom').value || 1.0),
+                    hflip: document.getElementById('transformHFlip').checked,
+                    vflip: document.getElementById('transformVFlip').checked
+                },
+                filter: {
+                    enabled: document.getElementById('filterEnabled').checked,
+                    preset: document.getElementById('filterPreset').value
+                },
+                borders: {
+                    enabled: document.getElementById('bordersEnabled').checked,
+                    type: document.getElementById('bordersType').value,
+                    thickness: parseInt(document.getElementById('bordersThickness').value || 20),
+                    color: document.getElementById('bordersColorText').value
+                },
+                speed: {
+                    enabled: document.getElementById('speedEnabled').checked,
+                    factor: parseFloat(document.getElementById('speedFactor').value || 1.0)
+                },
+                voice: {
+                    enabled: document.getElementById('voiceEnabled').checked,
+                    preset: document.getElementById('voicePreset').value,
+                    pitch_ratio: parseFloat(document.getElementById('voicePitch').value || 1.0)
+                },
+                color: {
+                    enabled: document.getElementById('colorEnabled').checked,
+                    brightness: parseFloat(document.getElementById('colorBrightness').value || 0),
+                    contrast: parseFloat(document.getElementById('colorContrast').value || 1.0),
+                    saturation: parseFloat(document.getElementById('colorSaturation').value || 1.0)
+                },
+                resolution: {
+                    enabled: document.getElementById('resolutionEnabled').checked,
+                    target: document.getElementById('resolutionTarget').value,
+                    fill: document.getElementById('resolutionFill').checked
+                },
+                denoise: {
+                    enabled: document.getElementById('denoiseEnabled').checked,
+                    strength: document.getElementById('denoiseStrength').value
+                },
+                title: {
+                    enabled: document.getElementById('titleEnabled').checked,
+                    text: document.getElementById('titleText').value || "",
+                    fontsize: 44,
+                    top_margin: parseInt(document.getElementById('titleTopMargin').value || 40)
+                },
+                ticker: {
+                    enabled: document.getElementById('tickerEnabled').checked,
+                    text: document.getElementById('tickerText').value || "",
+                    fontsize: 38,
+                    speed: 130,
+                    bar_height: parseInt(document.getElementById('tickerBarHeight').value || 85),
+                    bg_color: "white",
+                    fontcolor: "black"
+                },
+                trim: {
+                    enabled: exportMode === 'single',
+                    start: parseFloat(document.getElementById('trimStart').value || 0),
+                    duration: parseFloat(document.getElementById('trimDuration').value || 30),
+                    chunk_length: parseInt(document.getElementById('chunkLength').value || 30)
+                },
+                subtitles: {
+                    enabled: document.getElementById('subtitlesEnabled').checked && generatedSubtitleCues.length > 0,
+                    entries: generatedSubtitleCues,
+                    language: document.getElementById('subtitleLanguage').value,
+                    animation: document.getElementById('subAnimation').value,
+                    fontcolor: document.getElementById('subFontColor').value,
+                    outlinecolor: document.getElementById('subOutlineColor').value
+                }
+            };
+
+            const fd = new FormData();
+            fd.append("filename", loadedFilename);
+            fd.append("options", JSON.stringify(options));
+
+            try {
+                const res = await fetch(`${API_URL}/api/enhance`, { method: "POST", body: fd });
+                if(!res.ok) throw new Error("Processing thread exited with structural error status.");
+                
+                const data = await res.json();
+                
+                // Process Completed Response Layout Mapping
+                document.getElementById('singleDownloadWrapper').classList.add('hidden');
+                document.getElementById('segmentedDownloadWrapper').classList.add('hidden');
+
+                if(data.is_segmented) {
+                    document.getElementById('downloadZipLink').href = `${API_URL}${data.download_all_zip}`;
+                    const container = document.getElementById('chunkList');
+                    container.innerHTML = "";
+                    
+                    data.chunks.forEach(chunk => {
+                        const div = document.createElement('div');
+                        div.className = "flex items-center justify-between p-2 bg-gray-950 rounded border border-gray-800 text-xs";
+                        div.innerHTML = `
+                            <span class="text-gray-300 font-mono">${chunk.name}</span>
+                            <a href="${API_URL}${chunk.download}" target="_blank" class="text-indigo-400 hover:text-indigo-300 font-bold">Download</a>
+                        `;
+                        container.appendChild(div);
+                    });
+                    document.getElementById('segmentedDownloadWrapper').classList.remove('hidden');
+                } else {
+                    document.getElementById('downloadMainLink').href = `${API_URL}${data.download}`;
+                    document.getElementById('resultPreview').src = `${API_URL}${data.download}`;
+                    document.getElementById('singleDownloadWrapper').classList.remove('hidden');
+                }
+
+                downloadHub.classList.remove('hidden');
+            } catch (err) {
+                alert("Processing failed: check terminal engine logs.");
+            } finally {
+                enhanceBtn.disabled = false;
+                loader.classList.add('hidden');
+            }
+        });
+    </script>
+
+    <style>
+        @keyframes infinite-loading {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(200%); }
+        }
+        .animate-infinite-loading {
+            animation: infinite-loading 1.8s infinite linear;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #030712;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #1f2937;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #374151;
+        }
+    </style>
 </body>
 </html>
