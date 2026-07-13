@@ -74,11 +74,11 @@
                 <!-- LOADING PROGRESS BAR -->
                 <div id="processingLoader" class="hidden space-y-2">
                     <div class="flex justify-between text-xs text-gray-400">
-                        <span>Rendering engine running...</span>
-                        <span id="loaderPercent" class="animate-pulse text-indigo-400">Do not refresh</span>
+                        <span id="loaderLabel">Rendering engine running...</span>
+                        <span id="loaderPercent" class="text-indigo-400 font-mono">0%</span>
                     </div>
                     <div class="w-full h-1.5 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
-                        <div class="h-full bg-indigo-500 w-1/2 animate-infinite-loading rounded-full"></div>
+                        <div id="loaderBar" class="h-full bg-indigo-500 rounded-full transition-all duration-300" style="width:0%"></div>
                     </div>
                 </div>
             </div>
@@ -106,6 +106,28 @@
                 </h2>
 
                 <div class="space-y-6">
+                    <!-- EXPORT PERFORMANCE -->
+                    <div class="p-4 bg-indigo-950/20 rounded-xl border border-indigo-900/50">
+                        <span class="font-semibold text-sm text-gray-200 flex items-center gap-2 mb-3">⚙️ Export Performance</span>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Render Speed</label>
+                                <select id="renderSpeed" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none">
+                                    <option value="fast">Fast (best for long videos)</option>
+                                    <option value="balanced" selected>Balanced (recommended)</option>
+                                    <option value="quality">Quality (slowest, best compression)</option>
+                                </select>
+                            </div>
+                            <div class="flex items-end pb-2">
+                                <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                                    <input type="checkbox" id="hardwareAccel" checked class="rounded bg-gray-900 border-gray-700 text-indigo-600">
+                                    Use GPU hardware acceleration if available
+                                </label>
+                            </div>
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-2">For a 20–25 min video, "Fast" + hardware acceleration can cut export time dramatically. Automatically falls back to CPU encoding if no compatible GPU encoder is found.</p>
+                    </div>
+
                     <!-- TRANSFORM (ZOOM & MIRROR FLIPS) -->
                     <div class="p-4 bg-gray-950/60 rounded-xl border border-gray-800">
                         <label class="flex items-center justify-between mb-3 cursor-pointer">
@@ -538,6 +560,46 @@
             }
         });
 
+        // Polls /api/progress/{jobId} until the job is done or errors,
+        // updating the progress bar/percent text live along the way.
+        function pollProgress(jobId) {
+            const loaderBar = document.getElementById('loaderBar');
+            const loaderPercent = document.getElementById('loaderPercent');
+            const loaderLabel = document.getElementById('loaderLabel');
+
+            return new Promise((resolve, reject) => {
+                const interval = setInterval(async () => {
+                    try {
+                        const res = await fetch(`${API_URL}/api/progress/${jobId}`);
+                        const data = await res.json();
+                        if (!res.ok) {
+                            clearInterval(interval);
+                            reject(new Error(data.detail || "Lost track of this job."));
+                            return;
+                        }
+
+                        const pct = Math.round(data.percent || 0);
+                        loaderBar.style.width = pct + '%';
+                        loaderPercent.innerText = pct + '%';
+                        loaderLabel.innerText = pct >= 99 ? "Finalizing…" : "Rendering engine running...";
+
+                        if (data.status === 'done') {
+                            clearInterval(interval);
+                            loaderBar.style.width = '100%';
+                            loaderPercent.innerText = '100%';
+                            resolve(data.result);
+                        } else if (data.status === 'error') {
+                            clearInterval(interval);
+                            reject(new Error(data.detail || "Processing failed."));
+                        }
+                    } catch (err) {
+                        clearInterval(interval);
+                        reject(err);
+                    }
+                }, 1000);
+            });
+        }
+
         // Step 3: Package Config Object & Dispatch Enhancer Task Engine Call
         document.getElementById('enhanceBtn').addEventListener('click', async () => {
             if(!loadedFilename) return;
@@ -545,15 +607,21 @@
             const enhanceBtn = document.getElementById('enhanceBtn');
             const loader = document.getElementById('processingLoader');
             const downloadHub = document.getElementById('downloadHub');
-            
+
             enhanceBtn.disabled = true;
             loader.classList.remove('hidden');
             downloadHub.classList.add('hidden');
+            document.getElementById('loaderBar').style.width = '0%';
+            document.getElementById('loaderPercent').innerText = '0%';
 
             const exportMode = document.querySelector('input[name="exportMode"]:checked').value;
 
             // Strict variable parsing conversion ensures backend validation safety maps perfectly.
             const options = {
+                performance: {
+                    render_speed: document.getElementById('renderSpeed').value,
+                    hardware_accel: document.getElementById('hardwareAccel').checked
+                },
                 transform: {
                     enabled: document.getElementById('transformEnabled').checked,
                     zoom: parseFloat(document.getElementById('transformZoom').value || 1.0),
@@ -630,11 +698,12 @@
             fd.append("options", JSON.stringify(options));
 
             try {
-                const res = await fetch(`${API_URL}/api/enhance`, { method: "POST", body: fd });
-                if(!res.ok) throw new Error("Processing thread exited with structural error status.");
-                
-                const data = await res.json();
-                
+                const startRes = await fetch(`${API_URL}/api/enhance`, { method: "POST", body: fd });
+                const startData = await startRes.json();
+                if(!startRes.ok) throw new Error(startData.detail || "Could not start processing.");
+
+                const data = await pollProgress(startData.job_id);
+
                 // Process Completed Response Layout Mapping
                 document.getElementById('singleDownloadWrapper').classList.add('hidden');
                 document.getElementById('segmentedDownloadWrapper').classList.add('hidden');
@@ -662,7 +731,7 @@
 
                 downloadHub.classList.remove('hidden');
             } catch (err) {
-                alert("Processing failed: check terminal engine logs.");
+                alert("Processing failed: " + (err.message || "check terminal engine logs."));
             } finally {
                 enhanceBtn.disabled = false;
                 loader.classList.add('hidden');

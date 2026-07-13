@@ -21,6 +21,7 @@ import uuid
 import shutil
 import json
 import zipfile
+import threading
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
@@ -158,6 +159,167 @@ def download_youtube_video(url: str, job_id: str) -> str:
     if os.path.exists(raw_path):
         return raw_path
     raise HTTPException(status_code=500, detail="Download finished but the output file could not be located.")
+
+
+# ---------------------------------------------------------------------------
+# Encoding performance: auto-detect a GPU encoder if one's available (NVENC /
+# QuickSync / VideoToolbox) and map a simple "render speed" choice onto the
+# right preset for whichever encoder ends up being used. Long videos are
+# dominated by encode time, so this is the single biggest speed lever.
+# ---------------------------------------------------------------------------
+
+_HW_ENCODER_CACHE = "unchecked"
+
+
+def detect_hardware_encoder() -> Optional[str]:
+    global _HW_ENCODER_CACHE
+    if _HW_ENCODER_CACHE != "unchecked":
+        return _HW_ENCODER_CACHE
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=10,
+        )
+        out = result.stdout
+        if "h264_nvenc" in out:
+            _HW_ENCODER_CACHE = "nvenc"
+        elif "h264_qsv" in out:
+            _HW_ENCODER_CACHE = "qsv"
+        elif "h264_videotoolbox" in out:
+            _HW_ENCODER_CACHE = "videotoolbox"
+        else:
+            _HW_ENCODER_CACHE = None
+    except Exception:
+        _HW_ENCODER_CACHE = None
+    return _HW_ENCODER_CACHE
+
+
+def get_encode_args(perf: dict) -> list:
+    """Returns the -c:v ... video-encoder args for the requested speed/quality
+    tradeoff, using a GPU encoder automatically if one's available and not
+    explicitly disabled."""
+    render_speed = (perf or {}).get("render_speed", "balanced")
+    use_hw = (perf or {}).get("hardware_accel", True)
+    hw_encoder = detect_hardware_encoder() if use_hw else None
+
+    if hw_encoder == "nvenc":
+        nvenc_preset = {"fast": "p1", "balanced": "p4", "quality": "p6"}.get(render_speed, "p4")
+        return ["-c:v", "h264_nvenc", "-preset", nvenc_preset, "-cq", "20"]
+    if hw_encoder == "qsv":
+        qsv_preset = {"fast": "veryfast", "balanced": "fast", "quality": "medium"}.get(render_speed, "fast")
+        return ["-c:v", "h264_qsv", "-preset", qsv_preset, "-global_quality", "20"]
+    if hw_encoder == "videotoolbox":
+        return ["-c:v", "h264_videotoolbox", "-q:v", "60"]
+
+    # CPU fallback (also used if hardware encoding fails at runtime)
+    x264_preset = {"fast": "veryfast", "balanced": "fast", "quality": "medium"}.get(render_speed, "fast")
+    return ["-c:v", "libx264", "-preset", x264_preset, "-crf", "20"]
+
+
+# ---------------------------------------------------------------------------
+# Job progress tracking — an in-memory store the frontend polls while ffmpeg
+# runs, fed by parsing ffmpeg's own `-progress pipe:1` machine-readable
+# output (out_time_ms) against an estimated target output duration.
+# ---------------------------------------------------------------------------
+
+PROGRESS_LOCK = threading.Lock()
+PROGRESS_STORE = {}
+
+
+def update_progress(job_id: str, **kwargs):
+    with PROGRESS_LOCK:
+        PROGRESS_STORE.setdefault(job_id, {}).update(kwargs)
+
+
+def estimate_output_duration(opts: dict, source_duration: Optional[float]) -> float:
+    """Best-effort guess at the final output's duration, used only to turn
+    ffmpeg's out_time_ms into a percentage — doesn't need to be exact."""
+    source_duration = source_duration or 60.0
+    speed_factor = 1.0
+    speed_opt = opts.get("speed")
+    if speed_opt and speed_opt.get("enabled"):
+        f = float(speed_opt.get("factor", 1.0))
+        if f > 0:
+            speed_factor = f
+
+    trim_opt = opts.get("trim", {})
+    base_duration = trim_opt.get("duration", source_duration) if trim_opt.get("enabled") else source_duration
+    if not base_duration or base_duration <= 0:
+        base_duration = source_duration
+    return max(0.5, base_duration / speed_factor)
+
+
+def run_ffmpeg_with_progress(cmd: list, job_id: str, target_duration: float) -> tuple:
+    """Runs ffmpeg with -progress pipe:1 already baked into cmd, streaming
+    stdout for progress key=value lines while draining stderr on a separate
+    thread (needed for the eventual error message without deadlocking on a
+    full pipe buffer). Returns (returncode, stderr_text)."""
+    stderr_lines = []
+
+    def drain_stderr(pipe):
+        for line in iter(pipe.readline, ""):
+            stderr_lines.append(line)
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    err_thread = threading.Thread(target=drain_stderr, args=(proc.stderr,), daemon=True)
+    err_thread.start()
+
+    out_time_sec = 0.0
+    for line in proc.stdout:
+        line = line.strip()
+        if line.startswith("out_time_ms="):
+            try:
+                out_time_sec = int(line.split("=", 1)[1]) / 1_000_000
+            except ValueError:
+                pass
+        elif line.startswith("out_time="):
+            try:
+                h, m, s = line.split("=", 1)[1].split(":")
+                out_time_sec = int(h) * 3600 + int(m) * 60 + float(s)
+            except Exception:
+                pass
+        elif line.startswith("progress="):
+            state = line.split("=", 1)[1]
+            percent = (out_time_sec / target_duration) * 100 if target_duration else 0
+            percent = max(0, min(percent, 99 if state == "continue" else 100))
+            update_progress(job_id, status="processing", percent=round(percent, 1))
+
+    proc.wait()
+    err_thread.join(timeout=2)
+    return proc.returncode, "".join(stderr_lines)
+
+
+def run_ffmpeg_with_fallback(input_args: list, vf_chain: Optional[str], af_chain: Optional[str],
+                              build_tail, perf_opts: dict, job_id: str, target_duration: float):
+    """Runs ffmpeg with the chosen (possibly hardware) encoder; if that fails
+    (e.g. an encoder that *looked* available but the driver isn't actually
+    working), automatically retries once on CPU (libx264) instead of just
+    erroring out."""
+    encode_args = get_encode_args(perf_opts)
+    cmd = list(input_args)
+    if vf_chain: cmd += ["-vf", vf_chain]
+    if af_chain: cmd += ["-af", af_chain]
+    cmd += build_tail(encode_args)
+
+    update_progress(job_id, status="processing", percent=0)
+    returncode, stderr_text = run_ffmpeg_with_progress(cmd, job_id, target_duration)
+
+    if returncode != 0 and encode_args[1] != "libx264":
+        # Hardware encoder looked available but failed at runtime — retry on CPU.
+        update_progress(job_id, status="processing", percent=0)
+        cpu_args = get_encode_args({**(perf_opts or {}), "hardware_accel": False})
+        cmd = list(input_args)
+        if vf_chain: cmd += ["-vf", vf_chain]
+        if af_chain: cmd += ["-af", af_chain]
+        cmd += build_tail(cpu_args)
+        returncode, stderr_text = run_ffmpeg_with_progress(cmd, job_id, target_duration)
+
+    class _Result:
+        pass
+    result = _Result()
+    result.returncode = returncode
+    result.stderr = stderr_text
+    return result
 
 
 def get_video_info(path: str) -> dict:
@@ -493,10 +655,14 @@ def build_filter_chain(options: dict, work_dir: str, source_dims: dict) -> tuple
         target = resolution.get("target", "1080p")
         w, h = RESOLUTION_MAP.get(target, (1920, 1080))
         fill = resolution.get("fill", True)
+        # lanczos looks best but is the slowest scaler; bicubic is a good
+        # speed/quality tradeoff and is what "fast"/"balanced" use.
+        render_speed = (options.get("performance") or {}).get("render_speed", "balanced")
+        scale_flags = "lanczos" if render_speed == "quality" else "bicubic"
         if fill:
-            video_filters.append(f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}")
+            video_filters.append(f"scale={w}:{h}:force_original_aspect_ratio=increase:flags={scale_flags},crop={w}:{h}")
         else:
-            video_filters.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2")
+            video_filters.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags={scale_flags},pad={w}:{h}:(ow-iw)/2:(oh-ih)/2")
         out_w, out_h = w, h
 
     # 9. Physical Frame Borders (Solid / Blurred background padding)
@@ -622,8 +788,113 @@ def transcribe(filename: str = Form(...), model_size: str = Form("base"), langua
     return {"entries": entries, "cue_count": len(entries), "language": detected_language}
 
 
+def process_enhance_job(job_id: str, opts: dict, input_path: str):
+    """Runs the full enhance pipeline (previously the body of /api/enhance)
+    on a background thread, writing status/percent/result into
+    PROGRESS_STORE as it goes so the frontend can poll for updates."""
+    job_temp_dir = os.path.join(TEMP_DIR, job_id)
+    os.makedirs(job_temp_dir, exist_ok=True)
+
+    try:
+        trim_opt = opts.get("trim", {})
+
+        if trim_opt.get("enabled"):
+            clip_start = float(trim_opt.get("start", 0))
+            subs = opts.get("subtitles")
+            if subs and subs.get("enabled") and subs.get("entries") and clip_start:
+                shifted = []
+                for e in subs["entries"]:
+                    s = float(e.get("start", 0)) - clip_start
+                    en = float(e.get("end", s + 2)) - clip_start
+                    if en <= 0:
+                        continue
+                    shifted.append({**e, "start": max(0, s), "end": en})
+                subs["entries"] = shifted
+
+        source_dims = get_video_info(input_path)
+        source_dims["sample_rate"] = get_audio_sample_rate(input_path)
+        vf_chain, af_chain = build_filter_chain(opts, job_temp_dir, source_dims)
+        target_duration = estimate_output_duration(opts, source_dims.get("duration"))
+        perf_opts = opts.get("performance", {})
+
+        # --- CHUNKED MULTI-EXPORT SYSTEM ---
+        if not trim_opt.get("enabled"):
+            chunk_size = int(trim_opt.get("chunk_length", 30))
+            job_output_dir = os.path.join(OUTPUT_DIR, job_id)
+            os.makedirs(job_output_dir, exist_ok=True)
+
+            output_template = os.path.join(job_output_dir, "chunk_%03d.mp4")
+
+            def build_chunk_tail(encode_args):
+                return encode_args + [
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-f", "segment",
+                    "-segment_time", str(chunk_size),
+                    "-reset_timestamps", "1",
+                    "-force_key_frames", f"expr:gte(t,n_forced*{chunk_size})",
+                    output_template
+                ]
+
+            result = run_ffmpeg_with_fallback(
+                ["ffmpeg", "-y", "-progress", "pipe:1", "-nostats", "-i", input_path],
+                vf_chain, af_chain, build_chunk_tail, perf_opts, job_id, target_duration
+            )
+            shutil.rmtree(job_temp_dir, ignore_errors=True)
+            if result.returncode != 0:
+                update_progress(job_id, status="error", detail=result.stderr[-1500:])
+                return
+
+            generated_chunks = sorted(os.listdir(job_output_dir))
+            chunks = [
+                {"name": name, "download": f"/api/download_chunk/{job_id}/{name}"}
+                for name in generated_chunks
+            ]
+            final_result = {
+                "job_id": job_id,
+                "status": "done",
+                "is_segmented": True,
+                "chunk_count": len(generated_chunks),
+                "chunk_length": chunk_size,
+                "directory_location": job_output_dir,
+                "chunks": chunks,
+                "download_all_zip": f"/api/download_all_chunks/{job_id}",
+                "download": f"/api/download_chunk/{job_id}/{generated_chunks[0]}" if generated_chunks else None
+            }
+            update_progress(job_id, status="done", percent=100, result=final_result)
+
+        # --- STANDARD SINGLE FILE EXPORT ---
+        else:
+            output_filename = f"{job_id}_enhanced.mp4"
+            output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+            start = trim_opt.get("start", 0)
+            duration = trim_opt.get("duration", 30)
+
+            def build_single_tail(encode_args):
+                return encode_args + ["-c:a", "aac", "-b:a", "192k", output_path]
+
+            result = run_ffmpeg_with_fallback(
+                ["ffmpeg", "-y", "-progress", "pipe:1", "-nostats", "-ss", str(start), "-t", str(duration), "-i", input_path],
+                vf_chain, af_chain, build_single_tail, perf_opts, job_id, target_duration
+            )
+            shutil.rmtree(job_temp_dir, ignore_errors=True)
+            if result.returncode != 0:
+                update_progress(job_id, status="error", detail=result.stderr[-1500:])
+                return
+
+            final_result = {
+                "job_id": job_id, "status": "done", "is_segmented": False,
+                "download": f"/api/download/{output_filename}"
+            }
+            update_progress(job_id, status="done", percent=100, result=final_result)
+
+    except Exception as e:
+        shutil.rmtree(job_temp_dir, ignore_errors=True)
+        update_progress(job_id, status="error", detail=str(e))
+
+
 @app.post("/api/enhance")
-async def enhance(filename: str = Form(...), options: str = Form("{}")):
+def enhance(filename: str = Form(...), options: str = Form("{}")):
     if not ffmpeg_available():
         raise HTTPException(status_code=500, detail="FFmpeg not found on server.")
 
@@ -637,94 +908,21 @@ async def enhance(filename: str = Form(...), options: str = Form("{}")):
         raise HTTPException(status_code=404, detail="Uploaded file not found.")
 
     job_id = str(uuid.uuid4())
-    job_temp_dir = os.path.join(TEMP_DIR, job_id)
-    os.makedirs(job_temp_dir, exist_ok=True)
+    update_progress(job_id, status="queued", percent=0)
 
-    trim_opt = opts.get("trim", {})
+    thread = threading.Thread(target=process_enhance_job, args=(job_id, opts, input_path), daemon=True)
+    thread.start()
 
-    if trim_opt.get("enabled"):
-        clip_start = float(trim_opt.get("start", 0))
-        subs = opts.get("subtitles")
-        if subs and subs.get("enabled") and subs.get("entries") and clip_start:
-            shifted = []
-            for e in subs["entries"]:
-                s = float(e.get("start", 0)) - clip_start
-                en = float(e.get("end", s + 2)) - clip_start
-                if en <= 0:
-                    continue
-                shifted.append({**e, "start": max(0, s), "end": en})
-            subs["entries"] = shifted
+    return {"job_id": job_id, "status": "started"}
 
-    source_dims = get_video_info(input_path)
-    source_dims["sample_rate"] = get_audio_sample_rate(input_path)
-    vf_chain, af_chain = build_filter_chain(opts, job_temp_dir, source_dims)
 
-    # --- CHUNKED MULTI-EXPORT SYSTEM ---
-    if not trim_opt.get("enabled"):
-        chunk_size = int(trim_opt.get("chunk_length", 30))
-        job_output_dir = os.path.join(OUTPUT_DIR, job_id)
-        os.makedirs(job_output_dir, exist_ok=True)
-
-        output_template = os.path.join(job_output_dir, "chunk_%03d.mp4")
-
-        cmd = ["ffmpeg", "-y", "-i", input_path]
-        if vf_chain: cmd += ["-vf", vf_chain]
-        if af_chain: cmd += ["-af", af_chain]
-
-        cmd += [
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-            "-c:a", "aac", "-b:a", "192k",
-            "-f", "segment",
-            "-segment_time", str(chunk_size),
-            "-reset_timestamps", "1",
-            "-force_key_frames", f"expr:gte(t,n_forced*{chunk_size})",
-            output_template
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        shutil.rmtree(job_temp_dir, ignore_errors=True)
-        if result.returncode != 0:
-            raise HTTPException(status_code=500, detail={"error": "Transcription track compilation failed", "details": result.stderr[-1500:]})
-
-        generated_chunks = sorted(os.listdir(job_output_dir))
-        chunks = [
-            {
-                "name": name,
-                "download": f"/api/download_chunk/{job_id}/{name}",
-            }
-            for name in generated_chunks
-        ]
-        return {
-            "job_id": job_id,
-            "status": "done",
-            "is_segmented": True,
-            "chunk_count": len(generated_chunks),
-            "chunk_length": chunk_size,
-            "directory_location": job_output_dir,
-            "chunks": chunks,
-            "download_all_zip": f"/api/download_all_chunks/{job_id}",
-            "download": f"/api/download_chunk/{job_id}/{generated_chunks[0]}" if generated_chunks else None
-        }
-
-    # --- STANDARD SINGLE FILE EXPORT ---
-    else:
-        output_filename = f"{job_id}_enhanced.mp4"
-        output_path = os.path.join(OUTPUT_DIR, output_filename)
-
-        start = trim_opt.get("start", 0)
-        duration = trim_opt.get("duration", 30)
-
-        cmd = ["ffmpeg", "-y", "-ss", str(start), "-t", str(duration), "-i", input_path]
-        if vf_chain: cmd += ["-vf", vf_chain]
-        if af_chain: cmd += ["-af", af_chain]
-        cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-b:a", "192k", output_path]
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        shutil.rmtree(job_temp_dir, ignore_errors=True)
-        if result.returncode != 0:
-            raise HTTPException(status_code=500, detail={"error": "Transcription track compilation failed", "details": result.stderr[-1500:]})
-
-        return {"job_id": job_id, "status": "done", "is_segmented": False, "download": f"/api/download/{output_filename}"}
+@app.get("/api/progress/{job_id}")
+def get_progress(job_id: str):
+    with PROGRESS_LOCK:
+        data = PROGRESS_STORE.get(job_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Unknown job id.")
+    return data
 
 
 @app.get("/api/download_all_chunks/{job_id}")
