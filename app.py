@@ -6,6 +6,10 @@ through an FFmpeg pipeline: speed -> flip -> zoom -> crop -> denoise -> filters
 -> color correct -> upscale -> borders -> animated subtitles -> title overlay.
 Supports exporting the entire timeline as 30-second individual sequential chunks.
 
+Also supports a multi-clip timeline workflow: import up to 4 YouTube videos in
+parallel, cut multiple clips out of them, arrange the clips in any order,
+and merge the arranged sequence into one final exported video.
+
 Run:
     pip install -r requirements.txt
     uvicorn app:app --reload --port 5000
@@ -16,6 +20,7 @@ Docs (auto-generated, free with FastAPI):
 
 import os
 import platform
+import re
 import subprocess
 import uuid
 import shutil
@@ -45,9 +50,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
+CLIPS_DIR = os.path.join(BASE_DIR, "clips")
+MERGED_DIR = os.path.join(BASE_DIR, "merged")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
+os.makedirs(CLIPS_DIR, exist_ok=True)
+os.makedirs(MERGED_DIR, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
 
@@ -122,6 +131,16 @@ def allowed_file(filename: str) -> bool:
 # result can flow through the exact same probe/enhance pipeline as a manual
 # file upload. Only use this on content you have the rights to use.
 # ---------------------------------------------------------------------------
+
+YOUTUBE_URL_RE = re.compile(
+    r"^(https?://)?(www\.)?(m\.)?(youtube\.com/(watch\?v=|shorts/|embed/)|youtu\.be/)[\w-]{6,}",
+    re.IGNORECASE,
+)
+
+
+def is_valid_youtube_url(url: str) -> bool:
+    return bool(YOUTUBE_URL_RE.match((url or "").strip()))
+
 
 def download_youtube_video(url: str, job_id: str) -> str:
     if yt_dlp is None:
@@ -219,7 +238,9 @@ def get_encode_args(perf: dict) -> list:
 # ---------------------------------------------------------------------------
 # Job progress tracking — an in-memory store the frontend polls while ffmpeg
 # runs, fed by parsing ffmpeg's own `-progress pipe:1` machine-readable
-# output (out_time_ms) against an estimated target output duration.
+# output (out_time_ms) against an estimated target output duration. This same
+# store/poll pattern is reused for the enhance pipeline, YouTube imports,
+# clip extraction, and clip merging below.
 # ---------------------------------------------------------------------------
 
 PROGRESS_LOCK = threading.Lock()
@@ -754,6 +775,8 @@ def import_youtube(url: str = Form(...)):
     url = (url or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="A YouTube URL is required.")
+    if not is_valid_youtube_url(url):
+        raise HTTPException(status_code=400, detail=f"'{url}' doesn't look like a valid YouTube URL.")
 
     job_id = str(uuid.uuid4())
     downloaded_path = download_youtube_video(url, job_id)
@@ -957,3 +980,251 @@ def download_chunk(job_id: str, chunk_name: str):
     if not os.path.exists(file_path): 
         raise HTTPException(status_code=404, detail="Chunk item missing")
     return FileResponse(file_path, media_type="video/mp4", filename=chunk_name)
+
+
+# =============================================================================
+# MULTI-CLIP TIMELINE WORKFLOW
+# -----------------------------------------------------------------------------
+# Import up to 4 YouTube videos in parallel, cut multiple clips out of any of
+# them, arrange the resulting clips in any order, and merge that ordered
+# sequence into one final exported video. Every long-running step (import /
+# extraction / merge) is dispatched onto its own background thread and
+# reports progress through the same PROGRESS_STORE / /api/progress/{id}
+# polling contract already used by the enhance pipeline above, so the
+# frontend can track import, trimming, and merging with one shared mechanism.
+# =============================================================================
+
+MAX_BATCH_IMPORTS = 4
+
+CLIP_LOCK = threading.Lock()
+CLIP_STORE = {}  # clip_id -> clip metadata
+
+
+def process_youtube_import_job(job_id: str, url: str):
+    """Background job body for a single URL within a batch import. Writes
+    into the shared PROGRESS_STORE under `job_id` exactly like every other
+    job type, so the existing polling endpoint/pattern works unchanged."""
+    url = (url or "").strip()
+    update_progress(job_id, status="processing", percent=5, stage="Validating URL", url=url)
+
+    if not url:
+        update_progress(job_id, status="error", detail="Empty YouTube URL.", url=url)
+        return
+    if not is_valid_youtube_url(url):
+        update_progress(job_id, status="error", detail=f"'{url}' doesn't look like a valid YouTube URL.", url=url)
+        return
+
+    try:
+        update_progress(job_id, status="processing", percent=15, stage="Downloading", url=url)
+        path = download_youtube_video(url, job_id)
+        update_progress(job_id, status="processing", percent=90, stage="Reading video info", url=url)
+        info = get_video_info(path)
+        if not info.get("duration"):
+            update_progress(job_id, status="error", detail="Downloaded, but the video appears to be unreadable/corrupt.", url=url)
+            return
+        result = {"filename": os.path.basename(path), "source_url": url, **info}
+        update_progress(job_id, status="done", percent=100, result=result, url=url)
+    except HTTPException as e:
+        update_progress(job_id, status="error", detail=e.detail, url=url)
+    except Exception as e:
+        update_progress(job_id, status="error", detail=f"Unexpected error importing this video: {e}", url=url)
+
+
+@app.post("/api/import_youtube_batch")
+def import_youtube_batch(urls: str = Form(...)):
+    """Kicks off up to MAX_BATCH_IMPORTS parallel YouTube downloads. Returns
+    immediately with one job_id per URL; poll each with /api/progress/{id}."""
+    try:
+        url_list = json.loads(urls)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid urls JSON — expected a JSON array of strings.")
+
+    if not isinstance(url_list, list) or not url_list:
+        raise HTTPException(status_code=400, detail="Provide a non-empty list of YouTube URLs.")
+    if len(url_list) > MAX_BATCH_IMPORTS:
+        raise HTTPException(status_code=400, detail=f"Import up to {MAX_BATCH_IMPORTS} videos at a time.")
+
+    jobs = []
+    for url in url_list:
+        job_id = str(uuid.uuid4())
+        update_progress(job_id, status="queued", percent=0, url=url)
+        thread = threading.Thread(target=process_youtube_import_job, args=(job_id, url), daemon=True)
+        thread.start()
+        jobs.append({"job_id": job_id, "url": url})
+
+    return {"jobs": jobs}
+
+
+def process_clip_extraction_job(job_id: str, filename: str, start: float, duration: float, label: str):
+    input_path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(input_path):
+        update_progress(job_id, status="error", detail="Source video not found — it may not have finished importing.")
+        return
+
+    clip_id = job_id
+    output_path = os.path.join(CLIPS_DIR, f"{clip_id}.mp4")
+    cmd = [
+        "ffmpeg", "-y", "-progress", "pipe:1", "-nostats",
+        "-ss", str(max(0.0, start)), "-i", input_path, "-t", str(duration),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k",
+        output_path,
+    ]
+
+    update_progress(job_id, status="processing", percent=0)
+    returncode, stderr_text = run_ffmpeg_with_progress(cmd, job_id, max(duration, 0.5))
+
+    if returncode != 0:
+        update_progress(job_id, status="error", detail=stderr_text[-1500:] or "Clip extraction failed.")
+        return
+
+    info = get_video_info(output_path)
+    if not info.get("duration"):
+        update_progress(job_id, status="error", detail="Extraction finished but the clip came out unreadable — try a different start time.")
+        return
+
+    clip_meta = {
+        "clip_id": clip_id,
+        "source_filename": filename,
+        "label": label or filename,
+        "start": start,
+        "duration": duration,
+        "download": f"/api/download_clip/{clip_id}",
+        **info,
+    }
+    with CLIP_LOCK:
+        CLIP_STORE[clip_id] = {**clip_meta, "path": output_path}
+    update_progress(job_id, status="done", percent=100, result=clip_meta)
+
+
+@app.post("/api/extract_clip")
+def extract_clip(filename: str = Form(...), start: float = Form(...), duration: float = Form(...), label: str = Form("")):
+    """Starts one clip extraction job. The frontend fires several of these at
+    once (one per requested clip) to extract clips in parallel.
+
+    Clip length is unrestricted — the only requirements are that the start
+    time is non-negative, the resulting clip has positive duration (i.e. the
+    end time is after the start time), and the clip doesn't run past the end
+    of the source video."""
+    input_path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(input_path):
+        raise HTTPException(status_code=404, detail="That source video hasn't finished importing yet.")
+    if start < 0:
+        raise HTTPException(status_code=400, detail="Start time can't be negative.")
+    if duration <= 0:
+        raise HTTPException(status_code=400, detail="End time must be after the start time.")
+
+    source_info = get_video_info(input_path)
+    source_duration = source_info.get("duration")
+    if source_duration and (start + duration) > source_duration + 0.5:
+        raise HTTPException(
+            status_code=400,
+            detail="That start time + length runs past the end of the source video.",
+        )
+
+    job_id = str(uuid.uuid4())
+    update_progress(job_id, status="queued", percent=0)
+    thread = threading.Thread(
+        target=process_clip_extraction_job, args=(job_id, filename, start, duration, label), daemon=True
+    )
+    thread.start()
+    return {"job_id": job_id, "clip_id": job_id}
+
+
+@app.get("/api/download_clip/{clip_id}")
+def download_clip(clip_id: str):
+    with CLIP_LOCK:
+        meta = CLIP_STORE.get(clip_id)
+    if not meta or not os.path.exists(meta["path"]):
+        raise HTTPException(status_code=404, detail="Clip not found.")
+    return FileResponse(meta["path"], media_type="video/mp4", filename=f"{clip_id}.mp4")
+
+
+def process_merge_job(job_id: str, clip_ids: list):
+    with CLIP_LOCK:
+        clips = []
+        for cid in clip_ids:
+            meta = CLIP_STORE.get(cid)
+            if not meta or not os.path.exists(meta["path"]):
+                update_progress(job_id, status="error", detail=f"A clip in your timeline is missing (id: {cid}) — it may have failed extraction. Remove it and try again.")
+                return
+            clips.append(meta)
+
+    if not clips:
+        update_progress(job_id, status="error", detail="No clips to merge.")
+        return
+
+    # Normalize every clip to the first clip's resolution and a common 30fps
+    # / 48kHz stereo audio format inside the filtergraph, so clips pulled
+    # from different source videos (different resolutions/framerates) still
+    # concatenate cleanly into one continuous output.
+    target_w = clips[0].get("width") or 1920
+    target_h = clips[0].get("height") or 1080
+    total_duration = sum((c.get("duration") or 0) for c in clips) or 1.0
+
+    cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-nostats"]
+    for c in clips:
+        cmd += ["-i", c["path"]]
+
+    filter_parts = []
+    concat_inputs = ""
+    for i in range(len(clips)):
+        filter_parts.append(
+            f"[{i}:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+            f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v{i}]"
+        )
+        filter_parts.append(f"[{i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}]")
+        concat_inputs += f"[v{i}][a{i}]"
+    filter_parts.append(f"{concat_inputs}concat=n={len(clips)}:v=1:a=1[outv][outa]")
+    filter_complex = ";".join(filter_parts)
+
+    output_name = f"{job_id}_final.mp4"
+    output_path = os.path.join(MERGED_DIR, output_name)
+    cmd += [
+        "-filter_complex", filter_complex,
+        "-map", "[outv]", "-map", "[outa]",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k",
+        output_path,
+    ]
+
+    update_progress(job_id, status="processing", percent=0)
+    returncode, stderr_text = run_ffmpeg_with_progress(cmd, job_id, total_duration)
+
+    if returncode != 0:
+        update_progress(job_id, status="error", detail=stderr_text[-1500:] or "Merging clips failed.")
+        return
+
+    update_progress(job_id, status="done", percent=100, result={
+        "download": f"/api/download_merged/{output_name}",
+        "clip_count": len(clips),
+        "duration": total_duration,
+    })
+
+
+@app.post("/api/merge_clips")
+def merge_clips(clip_ids: str = Form(...)):
+    """Merges an ordered list of previously-extracted clip_ids into one final
+    video, preserving the given order."""
+    if not ffmpeg_available():
+        raise HTTPException(status_code=500, detail="FFmpeg not found on server.")
+    try:
+        ids = json.loads(clip_ids)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid clip_ids JSON — expected a JSON array of clip ids.")
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="Select at least one clip to merge.")
+
+    job_id = str(uuid.uuid4())
+    update_progress(job_id, status="queued", percent=0)
+    thread = threading.Thread(target=process_merge_job, args=(job_id, ids), daemon=True)
+    thread.start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/download_merged/{filename}")
+def download_merged(filename: str):
+    file_path = os.path.join(MERGED_DIR, os.path.basename(filename))
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File missing")
+    return FileResponse(file_path, media_type="video/mp4", filename=filename)

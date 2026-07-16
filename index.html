@@ -17,7 +17,14 @@
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <nav class="max-w-7xl mx-auto px-4 lg:px-6 pt-6">
+        <div class="inline-flex bg-gray-900 border border-gray-800 rounded-xl p-1 gap-1">
+            <button id="tabEnhancerBtn" class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold transition bg-indigo-600 text-white">Single Video Enhancer</button>
+            <button id="tabTimelineBtn" class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold transition text-gray-400 hover:text-gray-200">Multi-Clip Timeline Studio</button>
+        </div>
+    </nav>
+
+    <main id="enhancerView" class="max-w-7xl mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         <!-- LEFT COLUMN: FILE UPLOAD & PREVIEW MAP -->
         <section class="lg:col-span-5 space-y-6">
@@ -395,6 +402,80 @@
         </section>
     </main>
 
+    <!-- ========================================================================= -->
+    <!-- MULTI-CLIP TIMELINE STUDIO VIEW                                            -->
+    <!-- Import up to 4 YouTube videos in parallel, cut clips from any of them,     -->
+    <!-- drag to arrange the clips in any order, then merge into one export.        -->
+    <!-- ========================================================================= -->
+    <main id="timelineView" class="hidden max-w-7xl mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- LEFT: IMPORT UP TO 4 SOURCES -->
+        <section class="lg:col-span-5 space-y-6">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
+                <h2 class="text-lg font-bold mb-1 flex items-center gap-2">
+                    <span class="p-1.5 bg-indigo-950 text-indigo-400 rounded-lg">1</span> Import Sources
+                </h2>
+                <p class="text-xs text-gray-500 mb-4">Add up to 4 YouTube URLs. Every URL downloads in parallel — only import videos you own or have rights to use.</p>
+
+                <div id="ytUrlRows" class="space-y-2"></div>
+
+                <div class="flex gap-2 mt-3">
+                    <button id="addUrlRowBtn" class="flex-1 py-2 px-3 bg-gray-800 hover:bg-gray-700 text-gray-200 text-sm font-medium rounded-lg transition">+ Add another URL</button>
+                    <button id="importAllBtn" class="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-lg transition">Import All</button>
+                </div>
+
+                <div id="importStatusList" class="mt-4 space-y-2"></div>
+            </div>
+
+            <!-- IMPORTED SOURCE VIDEOS + CLIP CREATION -->
+            <div id="sourceVideosCard" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl space-y-4">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <span class="p-1.5 bg-indigo-950 text-indigo-400 rounded-lg">2</span> Trim Clips
+                </h2>
+                <p class="text-xs text-gray-500 -mt-2">Pick any start and end point — the preview seeks and loops within your trimmed range as you adjust it.</p>
+                <div id="sourceVideosList" class="space-y-4"></div>
+            </div>
+        </section>
+
+        <!-- RIGHT: TIMELINE / SEQUENCE EDITOR + MERGE -->
+        <section class="lg:col-span-7 space-y-6">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
+                <h2 class="text-lg font-bold mb-1 flex items-center gap-2">
+                    <span class="p-1.5 bg-indigo-950 text-indigo-400 rounded-lg">3</span> Timeline Sequence
+                </h2>
+                <p class="text-xs text-gray-500 mb-4">Drag clips to reorder. This is the exact order they'll be joined in.</p>
+
+                <div id="timelineEmptyState" class="border-2 border-dashed border-gray-800 rounded-xl p-8 text-center text-sm text-gray-500">
+                    Extracted clips will appear here — drag them into the order you want.
+                </div>
+                <div id="timelineList" class="space-y-2"></div>
+
+                <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-800">
+                    <span id="timelineSummary" class="text-xs text-gray-400">0 clips · 0s total</span>
+                    <button id="mergeClipsBtn" disabled class="py-3 px-6 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-lg transition">Join Clips Into Final Video</button>
+                </div>
+
+                <div id="mergeLoader" class="hidden space-y-2 mt-4">
+                    <div class="flex justify-between text-xs text-gray-400">
+                        <span id="mergeLoaderLabel">Merging clips...</span>
+                        <span id="mergeLoaderPercent" class="text-emerald-400 font-mono">0%</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
+                        <div id="mergeLoaderBar" class="h-full bg-emerald-500 rounded-full transition-all duration-300" style="width:0%"></div>
+                    </div>
+                </div>
+
+                <div id="mergeErrorBox" class="hidden mt-4 p-3 bg-rose-950/40 border border-rose-900 rounded-lg text-sm text-rose-300"></div>
+            </div>
+
+            <div id="mergeDownloadHub" class="hidden bg-gray-900 border border-emerald-900/40 rounded-xl p-6 shadow-xl space-y-4">
+                <h3 class="text-md font-bold text-emerald-400 flex items-center gap-2">🎬 Final Video Ready</h3>
+                <video id="mergeResultPreview" controls class="w-full rounded-lg border border-gray-800"></video>
+                <a id="mergeDownloadLink" href="#" target="_blank" class="w-full inline-flex justify-center items-center py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition">Download Merged Video (MP4)</a>
+            </div>
+        </section>
+    </main>
+
     <script>
         const API_URL = "http://localhost:5000";
         let loadedFilename = null;
@@ -735,6 +816,574 @@
             } finally {
                 enhanceBtn.disabled = false;
                 loader.classList.add('hidden');
+            }
+        });
+
+        // =====================================================================
+        // TAB SWITCHING
+        // =====================================================================
+        const tabEnhancerBtn = document.getElementById('tabEnhancerBtn');
+        const tabTimelineBtn = document.getElementById('tabTimelineBtn');
+        const enhancerView = document.getElementById('enhancerView');
+        const timelineView = document.getElementById('timelineView');
+
+        function setActiveTab(which) {
+            const activeClasses = ['bg-indigo-600', 'text-white'];
+            const inactiveClasses = ['text-gray-400', 'hover:text-gray-200'];
+            [tabEnhancerBtn, tabTimelineBtn].forEach(btn => btn.classList.remove(...activeClasses, ...inactiveClasses));
+
+            if (which === 'enhancer') {
+                enhancerView.classList.remove('hidden');
+                timelineView.classList.add('hidden');
+                tabEnhancerBtn.classList.add(...activeClasses);
+                tabTimelineBtn.classList.add(...inactiveClasses);
+            } else {
+                enhancerView.classList.add('hidden');
+                timelineView.classList.remove('hidden');
+                tabTimelineBtn.classList.add(...activeClasses);
+                tabEnhancerBtn.classList.add(...inactiveClasses);
+            }
+        }
+        tabEnhancerBtn.addEventListener('click', () => setActiveTab('enhancer'));
+        tabTimelineBtn.addEventListener('click', () => setActiveTab('timeline'));
+
+        // =====================================================================
+        // MULTI-CLIP TIMELINE STUDIO
+        // =====================================================================
+        const MAX_SOURCES = 4;
+
+        // sourceVideos: [{ rowId, filename, source_url, width, height, duration, status }]
+        let sourceVideos = [];
+        // timelineClips: [{ clip_id, label, duration, source_filename, download, status: 'pending'|'ready'|'error' }]
+        let timelineClips = [];
+        let urlRowCount = 0;
+
+        const ytUrlRows = document.getElementById('ytUrlRows');
+        const addUrlRowBtn = document.getElementById('addUrlRowBtn');
+        const importAllBtn = document.getElementById('importAllBtn');
+        const importStatusList = document.getElementById('importStatusList');
+        const sourceVideosCard = document.getElementById('sourceVideosCard');
+        const sourceVideosList = document.getElementById('sourceVideosList');
+        const timelineEmptyState = document.getElementById('timelineEmptyState');
+        const timelineList = document.getElementById('timelineList');
+        const timelineSummary = document.getElementById('timelineSummary');
+        const mergeClipsBtn = document.getElementById('mergeClipsBtn');
+        const mergeErrorBox = document.getElementById('mergeErrorBox');
+
+        function addUrlRow(prefill = "") {
+            if (ytUrlRows.children.length >= MAX_SOURCES) return;
+            urlRowCount += 1;
+            const rowId = `row-${urlRowCount}`;
+            const row = document.createElement('div');
+            row.className = "flex gap-2";
+            row.dataset.rowId = rowId;
+            row.innerHTML = `
+                <input type="text" class="yt-url-input flex-1 bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-sm text-gray-300 focus:outline-none focus:border-indigo-500" placeholder="https://www.youtube.com/watch?v=..." value="${prefill}">
+                <button class="removeUrlRowBtn px-3 py-2 bg-gray-800 hover:bg-rose-900 text-gray-400 hover:text-rose-300 text-sm rounded-lg transition">✕</button>
+            `;
+            row.querySelector('.removeUrlRowBtn').addEventListener('click', () => {
+                row.remove();
+                updateAddRowAvailability();
+            });
+            ytUrlRows.appendChild(row);
+            updateAddRowAvailability();
+        }
+
+        function updateAddRowAvailability() {
+            addUrlRowBtn.disabled = ytUrlRows.children.length >= MAX_SOURCES;
+            addUrlRowBtn.classList.toggle('opacity-50', addUrlRowBtn.disabled);
+        }
+
+        addUrlRowBtn.addEventListener('click', () => addUrlRow());
+        // Seed with one empty row to start.
+        addUrlRow();
+
+        function renderImportStatusRow(url, state) {
+            let row = importStatusList.querySelector(`[data-url="${CSS.escape(url)}"]`);
+            if (!row) {
+                row = document.createElement('div');
+                row.dataset.url = url;
+                row.className = "p-2.5 bg-gray-950 border border-gray-800 rounded-lg text-xs";
+                importStatusList.appendChild(row);
+            }
+
+            const badgeColors = {
+                queued: 'text-gray-400',
+                processing: 'text-indigo-400',
+                done: 'text-emerald-400',
+                error: 'text-rose-400',
+            };
+            const badgeText = {
+                queued: 'Queued',
+                processing: state.stage || 'Importing…',
+                done: 'Imported ✓',
+                error: 'Failed',
+            };
+
+            row.innerHTML = `
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-gray-300 truncate flex-1">${url}</span>
+                    <span class="${badgeColors[state.status] || 'text-gray-400'} font-semibold whitespace-nowrap">${badgeText[state.status] || state.status}</span>
+                </div>
+                ${state.status === 'error' ? `<div class="text-rose-400 mt-1">${state.detail || 'Import failed.'}</div>` : ''}
+                ${state.status === 'processing' ? `
+                    <div class="w-full h-1 bg-gray-900 rounded-full overflow-hidden mt-1.5">
+                        <div class="h-full bg-indigo-500 rounded-full transition-all duration-300" style="width:${state.percent || 0}%"></div>
+                    </div>` : ''}
+            `;
+        }
+
+        importAllBtn.addEventListener('click', async () => {
+            const urls = Array.from(ytUrlRows.querySelectorAll('.yt-url-input'))
+                .map(i => i.value.trim())
+                .filter(Boolean);
+
+            if (urls.length === 0) {
+                alert("Add at least one YouTube URL first.");
+                return;
+            }
+            if (urls.length > MAX_SOURCES) {
+                alert(`You can import up to ${MAX_SOURCES} videos at once.`);
+                return;
+            }
+
+            importAllBtn.disabled = true;
+            importAllBtn.innerText = "Importing…";
+            importStatusList.innerHTML = "";
+            urls.forEach(u => renderImportStatusRow(u, { status: 'queued' }));
+
+            const fd = new FormData();
+            fd.append("urls", JSON.stringify(urls));
+
+            try {
+                const res = await fetch(`${API_URL}/api/import_youtube_batch`, { method: "POST", body: fd });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "Could not start import.");
+
+                // Poll every job in parallel; each resolves/rejects independently
+                // so one bad URL never blocks the others from finishing.
+                await Promise.allSettled(data.jobs.map(job => pollImportJob(job.job_id, job.url)));
+            } catch (err) {
+                alert("Import failed: " + err.message);
+            } finally {
+                importAllBtn.disabled = false;
+                importAllBtn.innerText = "Import All";
+                if (sourceVideos.length > 0) sourceVideosCard.classList.remove('hidden');
+            }
+        });
+
+        function pollImportJob(jobId, url) {
+            return new Promise((resolve) => {
+                const interval = setInterval(async () => {
+                    try {
+                        const res = await fetch(`${API_URL}/api/progress/${jobId}`);
+                        const data = await res.json();
+                        if (!res.ok) {
+                            clearInterval(interval);
+                            renderImportStatusRow(url, { status: 'error', detail: data.detail });
+                            resolve();
+                            return;
+                        }
+                        renderImportStatusRow(url, data);
+
+                        if (data.status === 'done') {
+                            clearInterval(interval);
+                            const r = data.result;
+                            sourceVideos.push({
+                                rowId: jobId, filename: r.filename, source_url: r.source_url,
+                                width: r.width, height: r.height, duration: r.duration,
+                            });
+                            renderSourceVideos();
+                            resolve();
+                        } else if (data.status === 'error') {
+                            clearInterval(interval);
+                            resolve();
+                        }
+                    } catch (err) {
+                        clearInterval(interval);
+                        renderImportStatusRow(url, { status: 'error', detail: err.message });
+                        resolve();
+                    }
+                }, 1000);
+            });
+        }
+
+        // Clamp a number into [min, max], tolerating NaN by falling back to min.
+        function clampNum(val, min, max) {
+            if (isNaN(val)) val = min;
+            return Math.min(Math.max(val, min), max);
+        }
+
+        function renderSourceVideos() {
+            sourceVideosCard.classList.toggle('hidden', sourceVideos.length === 0);
+            sourceVideosList.innerHTML = "";
+
+            sourceVideos.forEach(video => {
+                // Sensible default trim window: 0s -> min(5s, full duration).
+                const knownDuration = video.duration || null;
+                const defaultEnd = knownDuration ? Math.min(5, knownDuration) : 5;
+
+                const card = document.createElement('div');
+                card.className = "p-4 bg-gray-950/60 rounded-xl border border-gray-800 space-y-3";
+                card.innerHTML = `
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-gray-300 font-medium truncate">${video.filename}</span>
+                        <span class="text-gray-500">${video.width || '?'}x${video.height || '?'} · ${video.duration ? Math.round(video.duration) + 's' : '?'}</span>
+                    </div>
+                    <video class="sourcePreviewVideo w-full rounded-lg border border-gray-800 max-h-40" src="${API_URL}/api/preview/${video.filename}" preload="metadata"></video>
+
+                    <div class="trimPlayheadTrack relative w-full h-2 bg-gray-900 rounded-full overflow-hidden border border-gray-800/60">
+                        <div class="trimRangeBar absolute top-0 h-full bg-indigo-900/70" style="left:0%;width:100%"></div>
+                        <div class="trimPlayhead absolute top-0 h-full w-0.5 bg-indigo-300" style="left:0%"></div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[11px] text-gray-500 mb-1">Clip Start (s)</label>
+                            <input type="number" class="clipStartInput w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none" value="0" min="0" step="0.1">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-gray-500 mb-1">Clip End (s)</label>
+                            <input type="number" class="clipEndInput w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm focus:outline-none" value="${defaultEnd}" min="0" step="0.1">
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button class="previewTrimBtn flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-sm font-semibold rounded-lg transition">▶ Preview Trim</button>
+                        <button class="extractClipBtn flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition">+ Add Clip to Timeline</button>
+                    </div>
+                    <div class="clipRowError hidden text-xs text-rose-400"></div>
+                `;
+
+                const previewVideo = card.querySelector('.sourcePreviewVideo');
+                const startInput = card.querySelector('.clipStartInput');
+                const endInput = card.querySelector('.clipEndInput');
+                const previewTrimBtn = card.querySelector('.previewTrimBtn');
+                const extractBtn = card.querySelector('.extractClipBtn');
+                const errorBox = card.querySelector('.clipRowError');
+                const rangeBar = card.querySelector('.trimRangeBar');
+                const playhead = card.querySelector('.trimPlayhead');
+
+                // Per-card trim/playback state — kept in sync with the inputs
+                // and the <video> element on every trim, seek, play, and pause.
+                const trimState = {
+                    clipStart: 0,
+                    clipEnd: defaultEnd,
+                    currentTime: 0,
+                    isPlaying: false,
+                    knownDuration: knownDuration,
+                };
+
+                function effectiveDuration() {
+                    return trimState.knownDuration || previewVideo.duration || null;
+                }
+
+                // Redraws the range bar (trimmed window) and the playhead
+                // (current playback position) against the video's full duration.
+                function updateRangeVisuals() {
+                    const dur = effectiveDuration();
+                    if (!dur || dur <= 0) return;
+                    const startPct = clampNum((trimState.clipStart / dur) * 100, 0, 100);
+                    const endPct = clampNum((trimState.clipEnd / dur) * 100, 0, 100);
+                    rangeBar.style.left = startPct + '%';
+                    rangeBar.style.width = Math.max(0, endPct - startPct) + '%';
+                    const playheadPct = clampNum((trimState.currentTime / dur) * 100, 0, 100);
+                    playhead.style.left = playheadPct + '%';
+                }
+
+                // Applies the current start/end input values into trimState and
+                // the video element immediately — this is the "every trim
+                // updates clipStart/clipEnd/currentTime/playback" requirement.
+                function applyTrimFromInputs() {
+                    const dur = effectiveDuration();
+                    let start = parseFloat(startInput.value);
+                    let end = parseFloat(endInput.value);
+
+                    if (isNaN(start)) start = 0;
+                    if (isNaN(end)) end = start + 1;
+
+                    start = Math.max(0, start);
+                    if (dur) start = Math.min(start, dur);
+                    if (end <= start) end = start + 0.1;
+                    if (dur) end = Math.min(end, dur);
+
+                    // Reflect any clamping back into the inputs so the UI never
+                    // silently disagrees with the state driving playback.
+                    startInput.value = start;
+                    endInput.value = end;
+
+                    trimState.clipStart = start;
+                    trimState.clipEnd = end;
+
+                    errorBox.classList.add('hidden');
+
+                    // Immediately move the player to the new trimmed start and
+                    // keep currentTime/state in sync, whether or not it's mid-playback.
+                    if (!isNaN(previewVideo.duration)) {
+                        previewVideo.currentTime = start;
+                    }
+                    trimState.currentTime = start;
+                    updateRangeVisuals();
+                }
+
+                previewVideo.addEventListener('loadedmetadata', () => {
+                    trimState.knownDuration = previewVideo.duration || trimState.knownDuration;
+                    applyTrimFromInputs();
+                });
+
+                startInput.addEventListener('input', applyTrimFromInputs);
+                endInput.addEventListener('input', applyTrimFromInputs);
+                startInput.addEventListener('change', applyTrimFromInputs);
+                endInput.addEventListener('change', applyTrimFromInputs);
+
+                // Keep the playhead + currentTime state synced on every frame
+                // of playback, and enforce the trimmed end boundary so playback
+                // always stops exactly at clipEnd.
+                previewVideo.addEventListener('timeupdate', () => {
+                    trimState.currentTime = previewVideo.currentTime;
+                    if (previewVideo.currentTime >= trimState.clipEnd) {
+                        previewVideo.pause();
+                        previewVideo.currentTime = trimState.clipStart;
+                        trimState.currentTime = trimState.clipStart;
+                        trimState.isPlaying = false;
+                        previewTrimBtn.innerText = '▶ Preview Trim';
+                    }
+                    updateRangeVisuals();
+                });
+
+                previewVideo.addEventListener('play', () => {
+                    // Always resume playback from within the trimmed range.
+                    if (previewVideo.currentTime < trimState.clipStart || previewVideo.currentTime >= trimState.clipEnd) {
+                        previewVideo.currentTime = trimState.clipStart;
+                    }
+                    trimState.isPlaying = true;
+                    previewTrimBtn.innerText = '⏸ Pause Trim';
+                });
+
+                previewVideo.addEventListener('pause', () => {
+                    trimState.isPlaying = false;
+                    previewTrimBtn.innerText = '▶ Preview Trim';
+                });
+
+                // Manual seeks (dragging the native scrubber) stay clamped to
+                // the trimmed window so the range stays authoritative.
+                previewVideo.addEventListener('seeked', () => {
+                    if (previewVideo.currentTime < trimState.clipStart) {
+                        previewVideo.currentTime = trimState.clipStart;
+                    } else if (previewVideo.currentTime > trimState.clipEnd) {
+                        previewVideo.currentTime = trimState.clipEnd;
+                    }
+                    trimState.currentTime = previewVideo.currentTime;
+                    updateRangeVisuals();
+                });
+
+                previewTrimBtn.addEventListener('click', () => {
+                    if (trimState.isPlaying) {
+                        previewVideo.pause();
+                    } else {
+                        previewVideo.currentTime = trimState.clipStart;
+                        previewVideo.play();
+                    }
+                });
+
+                extractBtn.addEventListener('click', async () => {
+                    // Re-apply in case the user clicks straight after typing
+                    // without blurring the field.
+                    applyTrimFromInputs();
+
+                    const start = trimState.clipStart;
+                    const end = trimState.clipEnd;
+                    const duration = end - start;
+                    errorBox.classList.add('hidden');
+
+                    if (start < 0) {
+                        errorBox.textContent = "Start time can't be negative.";
+                        errorBox.classList.remove('hidden');
+                        return;
+                    }
+                    if (end <= start) {
+                        errorBox.textContent = "End time must be after the start time.";
+                        errorBox.classList.remove('hidden');
+                        return;
+                    }
+                    const dur = effectiveDuration();
+                    if (dur && end > dur + 0.5) {
+                        errorBox.textContent = "That end time runs past the end of the source video.";
+                        errorBox.classList.remove('hidden');
+                        return;
+                    }
+
+                    extractBtn.disabled = true;
+                    extractBtn.innerText = "Extracting…";
+
+                    const label = `${video.filename} @ ${start.toFixed(1)}s–${end.toFixed(1)}s`;
+                    const pendingId = `pending-${crypto.randomUUID()}`;
+                    timelineClips.push({ clip_id: pendingId, label, duration, source_filename: video.filename, status: 'pending' });
+                    renderTimeline();
+
+                    const fd = new FormData();
+                    fd.append("filename", video.filename);
+                    fd.append("start", start);
+                    fd.append("duration", duration);
+                    fd.append("label", label);
+
+                    try {
+                        const res = await fetch(`${API_URL}/api/extract_clip`, { method: "POST", body: fd });
+                        const startData = await res.json();
+                        if (!res.ok) throw new Error(startData.detail || "Could not start clip extraction.");
+
+                        const result = await pollGenericJob(startData.job_id);
+                        const idx = timelineClips.findIndex(c => c.clip_id === pendingId);
+                        if (idx !== -1) {
+                            timelineClips[idx] = { ...result, status: 'ready' };
+                        }
+                    } catch (err) {
+                        const idx = timelineClips.findIndex(c => c.clip_id === pendingId);
+                        if (idx !== -1) timelineClips[idx].status = 'error';
+                        errorBox.textContent = "Clip extraction failed: " + err.message;
+                        errorBox.classList.remove('hidden');
+                    } finally {
+                        extractBtn.disabled = false;
+                        extractBtn.innerText = "+ Add Clip to Timeline";
+                        renderTimeline();
+                    }
+                });
+
+                // Initial sync so the range bar/playhead reflect the default
+                // window even before metadata has loaded.
+                updateRangeVisuals();
+
+                sourceVideosList.appendChild(card);
+            });
+        }
+
+        // Generic poller for any job_id written into the shared PROGRESS_STORE
+        // (used for clip extraction and merge, same contract as pollProgress
+        // in the single-video enhancer above).
+        function pollGenericJob(jobId, onTick) {
+            return new Promise((resolve, reject) => {
+                const interval = setInterval(async () => {
+                    try {
+                        const res = await fetch(`${API_URL}/api/progress/${jobId}`);
+                        const data = await res.json();
+                        if (!res.ok) {
+                            clearInterval(interval);
+                            reject(new Error(data.detail || "Lost track of this job."));
+                            return;
+                        }
+                        if (onTick) onTick(data);
+                        if (data.status === 'done') {
+                            clearInterval(interval);
+                            resolve(data.result);
+                        } else if (data.status === 'error') {
+                            clearInterval(interval);
+                            reject(new Error(data.detail || "Job failed."));
+                        }
+                    } catch (err) {
+                        clearInterval(interval);
+                        reject(err);
+                    }
+                }, 1000);
+            });
+        }
+
+        // --- Timeline (sequence editor): render, drag-reorder, remove ---
+        function renderTimeline() {
+            const readyClips = timelineClips;
+            timelineEmptyState.classList.toggle('hidden', readyClips.length > 0);
+            timelineList.innerHTML = "";
+
+            readyClips.forEach((clip, index) => {
+                const item = document.createElement('div');
+                const isReady = clip.status === 'ready';
+                const isError = clip.status === 'error';
+                item.draggable = isReady;
+                item.dataset.index = index;
+                item.className = `flex items-center gap-3 p-3 rounded-lg border text-sm transition ${
+                    isReady ? 'bg-gray-950 border-gray-800 cursor-move hover:border-indigo-600' :
+                    isError ? 'bg-rose-950/30 border-rose-900' : 'bg-gray-950/60 border-gray-800 opacity-70'
+                }`;
+                item.innerHTML = `
+                    <span class="text-gray-600 font-mono text-xs w-5">${isReady ? '⠿' : ''}</span>
+                    <span class="w-6 h-6 flex items-center justify-center rounded bg-gray-800 text-indigo-300 text-xs font-bold">${index + 1}</span>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-gray-200 truncate">${clip.label}</div>
+                        <div class="text-[11px] ${isReady ? 'text-gray-500' : isError ? 'text-rose-400' : 'text-indigo-400'}">
+                            ${isReady ? clip.duration.toFixed(1) + 's clip' : isError ? 'Extraction failed' : 'Extracting…'}
+                        </div>
+                    </div>
+                    <button class="removeClipBtn text-gray-500 hover:text-rose-400 text-xs px-2">✕</button>
+                `;
+                item.querySelector('.removeClipBtn').addEventListener('click', () => {
+                    timelineClips.splice(index, 1);
+                    renderTimeline();
+                });
+
+                item.addEventListener('dragstart', () => item.classList.add('opacity-40'));
+                item.addEventListener('dragend', () => item.classList.remove('opacity-40'));
+                item.addEventListener('dragover', (e) => e.preventDefault());
+                item.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const fromIndex = parseInt(document.querySelector('.opacity-40')?.dataset.index);
+                    const toIndex = index;
+                    if (isNaN(fromIndex) || fromIndex === toIndex) return;
+                    const [moved] = timelineClips.splice(fromIndex, 1);
+                    timelineClips.splice(toIndex, 0, moved);
+                    renderTimeline();
+                });
+
+                timelineList.appendChild(item);
+            });
+
+            const readyCount = timelineClips.filter(c => c.status === 'ready').length;
+            const totalDuration = timelineClips.filter(c => c.status === 'ready').reduce((sum, c) => sum + (c.duration || 0), 0);
+            timelineSummary.innerText = `${readyCount} clip${readyCount === 1 ? '' : 's'} ready · ${totalDuration.toFixed(1)}s total`;
+            mergeClipsBtn.disabled = readyCount === 0 || timelineClips.some(c => c.status === 'pending');
+        }
+
+        // --- Merge ---
+        mergeClipsBtn.addEventListener('click', async () => {
+            const orderedIds = timelineClips.filter(c => c.status === 'ready').map(c => c.clip_id);
+            if (orderedIds.length === 0) return;
+
+            const mergeLoader = document.getElementById('mergeLoader');
+            const mergeLoaderBar = document.getElementById('mergeLoaderBar');
+            const mergeLoaderPercent = document.getElementById('mergeLoaderPercent');
+            const mergeLoaderLabel = document.getElementById('mergeLoaderLabel');
+            const mergeDownloadHub = document.getElementById('mergeDownloadHub');
+
+            mergeClipsBtn.disabled = true;
+            mergeErrorBox.classList.add('hidden');
+            mergeDownloadHub.classList.add('hidden');
+            mergeLoader.classList.remove('hidden');
+            mergeLoaderBar.style.width = '0%';
+            mergeLoaderPercent.innerText = '0%';
+            mergeLoaderLabel.innerText = 'Merging clips…';
+
+            const fd = new FormData();
+            fd.append("clip_ids", JSON.stringify(orderedIds));
+
+            try {
+                const startRes = await fetch(`${API_URL}/api/merge_clips`, { method: "POST", body: fd });
+                const startData = await startRes.json();
+                if (!startRes.ok) throw new Error(startData.detail || "Could not start merging.");
+
+                const result = await pollGenericJob(startData.job_id, (data) => {
+                    const pct = Math.round(data.percent || 0);
+                    mergeLoaderBar.style.width = pct + '%';
+                    mergeLoaderPercent.innerText = pct + '%';
+                    mergeLoaderLabel.innerText = pct >= 99 ? 'Finalizing…' : 'Merging clips…';
+                });
+
+                document.getElementById('mergeDownloadLink').href = `${API_URL}${result.download}`;
+                document.getElementById('mergeResultPreview').src = `${API_URL}${result.download}`;
+                mergeDownloadHub.classList.remove('hidden');
+            } catch (err) {
+                mergeErrorBox.textContent = "Merge failed: " + err.message;
+                mergeErrorBox.classList.remove('hidden');
+            } finally {
+                mergeLoader.classList.add('hidden');
+                mergeClipsBtn.disabled = timelineClips.filter(c => c.status === 'ready').length === 0;
             }
         });
     </script>
